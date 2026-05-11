@@ -347,6 +347,15 @@ func FormatPeriodDigest(consumedByDay, burnedByDay map[int]float64, days int) st
 	return b.String()
 }
 
+// Baseline is the rolling average over the days preceding the target day,
+// used to draw "↑8 vs 7d" inline deltas. Nil means "not enough data".
+type Baseline struct {
+	Days        int
+	RecoveryAvg float64
+	HRVAvg      float64
+	RHRAvg      float64
+}
+
 // InfoPayload bundles the data the verbose day report renders from.
 type InfoPayload struct {
 	Day      time.Time
@@ -356,10 +365,30 @@ type InfoPayload struct {
 	Sleep    *domain.Sleep
 	Workouts []domain.Workout
 	Meals    []domain.MealEntry
+	Baseline *Baseline
 
 	// WhoopStatus describes the outcome of Whoop API calls so the user knows
 	// whether "данных нет" means "Whoop вернул пусто" or "не удалось получить".
 	WhoopStatus string
+}
+
+// deltaArrow renders a signed delta as "↑5", "↓3", or "→" if near zero.
+// decimals is how many digits after the dot.
+func deltaArrow(delta float64, decimals int) string {
+	abs := delta
+	if abs < 0 {
+		abs = -abs
+	}
+	if abs < 0.5 && decimals == 0 {
+		return "→"
+	}
+	if abs < 0.05 && decimals > 0 {
+		return "→"
+	}
+	if delta > 0 {
+		return "↑" + fmtFloat(delta, decimals)
+	}
+	return "↓" + fmtFloat(-delta, decimals)
 }
 
 // FormatInfo renders a long, narrative day report touching every field we
@@ -381,7 +410,7 @@ func FormatInfo(p InfoPayload) string {
 	}
 
 	if p.Recovery != nil {
-		writeRecovery(&b, p.Recovery)
+		writeRecovery(&b, p.Recovery, p.Baseline)
 	} else {
 		b.WriteString("💪 *Recovery* — данных нет\n\n")
 	}
@@ -434,11 +463,25 @@ func writeSleep(b *strings.Builder, s *domain.Sleep, loc *time.Location) {
 		mdv2Escape(fmtDurationHM(s.SleepNeed.FromNapMs)))
 }
 
-func writeRecovery(b *strings.Builder, r *domain.Recovery) {
-	fmt.Fprintf(b, "💪 *Recovery* %s%% %s — %s\\.\n",
-		fmtFloat(r.Score, 0), recoveryEmoji(r.Score), mdv2Escape(recoveryLabel(r.Score)))
-	fmt.Fprintf(b, "  HRV %s ms, RHR %s bpm\\.\n",
-		fmtFloat(r.HRVMilli, 0), fmtFloat(r.RestingHR, 0))
+func writeRecovery(b *strings.Builder, r *domain.Recovery, base *Baseline) {
+	fmt.Fprintf(b, "💪 *Recovery* %s%% %s", fmtFloat(r.Score, 0), recoveryEmoji(r.Score))
+	if base != nil {
+		fmt.Fprintf(b, " \\(%s vs %dd avg\\)",
+			mdv2Escape(deltaArrow(r.Score-base.RecoveryAvg, 0)), base.Days)
+	}
+	fmt.Fprintf(b, " — %s\\.\n", mdv2Escape(recoveryLabel(r.Score)))
+
+	fmt.Fprintf(b, "  HRV %s ms", fmtFloat(r.HRVMilli, 0))
+	if base != nil {
+		fmt.Fprintf(b, " \\(%s vs %dd\\)",
+			mdv2Escape(deltaArrow(r.HRVMilli-base.HRVAvg, 0)), base.Days)
+	}
+	fmt.Fprintf(b, ", RHR %s bpm", fmtFloat(r.RestingHR, 0))
+	if base != nil {
+		fmt.Fprintf(b, " \\(%s vs %dd\\)",
+			mdv2Escape(deltaArrow(r.RestingHR-base.RHRAvg, 0)), base.Days)
+	}
+	b.WriteString("\\.\n")
 	if r.SpO2Pct != nil {
 		fmt.Fprintf(b, "  SpO2 %s%%\\.\n", fmtFloat(*r.SpO2Pct, 1))
 	}
@@ -698,6 +741,54 @@ func microLine(fields map[string]*float64, unit string, decimals int) string {
 		parts = append(parts, fmt.Sprintf("%s %s%s", k, fmtFloat(*fields[k], decimals), unit))
 	}
 	return strings.Join(parts, " · ")
+}
+
+// FormatNotes renders a section of user log entries (weight, notes, symptoms)
+// newest first. Returns empty string if the slice is empty.
+func FormatNotes(ns []domain.Note, loc *time.Location) string {
+	if len(ns) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n📝 *Заметки*\n")
+	for _, n := range ns {
+		date := fmtDate(n.Ts, loc)
+		clock := fmtClock(n.Ts, loc)
+		switch n.Kind {
+		case domain.NoteKindWeight:
+			val := "—"
+			if n.Value != nil {
+				val = fmtFloat(*n.Value, 2)
+			}
+			line := fmt.Sprintf("  • %s · вес *%s кг*", date, val)
+			if n.Body != "" {
+				line += " · " + mdv2Escape(n.Body)
+			}
+			b.WriteString(mdv2EscapePrefix(line) + "\n")
+		case domain.NoteKindSymptom:
+			b.WriteString(fmt.Sprintf("  • %s %s · 🩹 %s\n",
+				mdv2Escape(date), mdv2Escape(clock), mdv2Escape(n.Body)))
+		default:
+			b.WriteString(fmt.Sprintf("  • %s %s · %s\n",
+				mdv2Escape(date), mdv2Escape(clock), mdv2Escape(n.Body)))
+		}
+	}
+	return b.String()
+}
+
+// mdv2EscapePrefix escapes the parts of a pre-built line that we DIDN'T
+// already write as MarkdownV2 syntax (the * blocks). Kept tiny on purpose —
+// only used for the weight line where we mix bold and escaped text.
+func mdv2EscapePrefix(s string) string {
+	// Hack: split by "*", odd-indexed segments are bold content (already raw),
+	// even-indexed are surrounding text that needs escaping.
+	parts := strings.Split(s, "*")
+	for i := range parts {
+		if i%2 == 0 {
+			parts[i] = mdv2Escape(parts[i])
+		}
+	}
+	return strings.Join(parts, "*")
 }
 
 // SplitForTelegram breaks s into chunks no longer than telegramMessageLimit,

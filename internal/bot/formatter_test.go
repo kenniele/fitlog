@@ -108,6 +108,34 @@ func TestFormatInfo_EmptyShowsPlaceholders(t *testing.T) {
 	require.Contains(t, out, "Питание* — записей нет")
 }
 
+func TestDeltaArrow(t *testing.T) {
+	require.Equal(t, "↑8", deltaArrow(8, 0))
+	require.Equal(t, "↓4", deltaArrow(-4, 0))
+	require.Equal(t, "→", deltaArrow(0, 0))
+	require.Equal(t, "→", deltaArrow(0.2, 0))
+	// fmtFloat escapes the decimal point for MDv2 inside the arrow output.
+	require.Equal(t, "↑0\\.5", deltaArrow(0.5, 1))
+	require.Equal(t, "↓2\\.3", deltaArrow(-2.3, 1))
+}
+
+func TestFormatNotes(t *testing.T) {
+	loc := time.UTC
+	ts := time.Date(2026, 5, 11, 8, 30, 0, 0, loc)
+	w := 105.2
+	ns := []domain.Note{
+		{Ts: ts, Kind: domain.NoteKindWeight, Value: &w, Body: "натощак"},
+		{Ts: ts.Add(2 * time.Hour), Kind: domain.NoteKindSymptom, Body: "горло першит"},
+		{Ts: ts.Add(4 * time.Hour), Kind: domain.NoteKindNote, Body: "Усталость в ногах"},
+	}
+	out := FormatNotes(ns, loc)
+	require.Contains(t, out, "*Заметки*")
+	require.Contains(t, out, "вес *105\\.2 кг*")
+	require.Contains(t, out, "натощак")
+	require.Contains(t, out, "🩹")
+	require.Contains(t, out, "горло першит")
+	require.Contains(t, out, "Усталость в ногах")
+}
+
 func TestFormatPeriodDigest_Deficit(t *testing.T) {
 	consumed := map[int]float64{1: 1800, 2: 1700, 3: 1850}
 	burned := map[int]float64{1: 2100, 2: 2200, 3: 2050}

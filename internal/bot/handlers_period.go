@@ -143,6 +143,16 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 			}
 		}
 
+		// Notes for the period — newest first.
+		if b.deps.Notes != nil {
+			notesFrom := now.AddDate(0, 0, -days)
+			if ns, err := b.deps.Notes.ListBetween(ctx, notesFrom, now); err != nil {
+				b.deps.Logger.Warn("list notes", "err", err)
+			} else if len(ns) > 0 {
+				body.WriteString(FormatNotes(ns, loc))
+			}
+		}
+
 		out := header.String()
 		if digest := FormatPeriodDigest(consumedByDay, burnedByDay, days); digest != "" {
 			out += digest + "\n"

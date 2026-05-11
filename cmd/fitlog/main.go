@@ -77,6 +77,7 @@ func run(parent context.Context) error {
 		return fmt.Errorf("cipher: %w", err)
 	}
 	tokenStore := auth.NewTokenStore(storage.NewTokensRepo(pool), cipher)
+	notesRepo := storage.NewNotesRepo(pool)
 
 	// Whoop OAuth config
 	oauthCfg := whoop.NewOAuthConfig(cfg.WhoopClientID, cfg.WhoopClientSecret, cfg.WhoopRedirectURI, nil)
@@ -95,6 +96,7 @@ func run(parent context.Context) error {
 	allowlist := bot.NewAllowlist(cfg.TelegramAllowedUserIDs, logger)
 	deps := bot.Deps{
 		Tokens:      tokenStore,
+		Notes:       notesRepo,
 		OAuthConfig: oauthCfg,
 		FatSecret:   fsClient,
 		States:      states,

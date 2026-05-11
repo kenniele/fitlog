@@ -53,16 +53,7 @@ func (b *Bot) sendDayReport(c tele.Context, day time.Time) error {
 		var apiErr error
 		var totalRecords int
 
-		cycles, err := wc.Cycles(ctx, rng, 25)
-		if err != nil {
-			b.deps.Logger.Warn("whoop cycles", "err", err)
-			apiErr = err
-		}
-		totalRecords += len(cycles)
-		if cy := pickCycle(cycles, day, dayEnd); cy != nil {
-			payload.Cycle = cy
-		}
-
+		// Sleep first — used to anchor recovery via sleep_id.
 		sleeps, err := wc.Sleeps(ctx, rng, 25)
 		if err != nil {
 			b.deps.Logger.Warn("whoop sleeps", "err", err)
@@ -73,14 +64,33 @@ func (b *Bot) sendDayReport(c tele.Context, day time.Time) error {
 			payload.Sleep = s
 		}
 
-		recs, err := wc.Recoveries(ctx, rng, 25)
+		// Recoveries: 14-day window so we can both pick the target AND compute
+		// the rolling baseline used for ↑/↓ deltas.
+		baseRng := domain.TimeRange{From: dayEnd.AddDate(0, 0, -14), To: dayEnd.Add(6 * time.Hour)}
+		recs, err := wc.Recoveries(ctx, baseRng, 25)
 		if err != nil {
 			b.deps.Logger.Warn("whoop recoveries", "err", err)
 			apiErr = err
 		}
 		totalRecords += len(recs)
-		if rec := pickRecovery(recs, payload.Cycle, payload.Sleep); rec != nil {
+		if rec := pickRecovery(recs, nil, payload.Sleep); rec != nil {
 			payload.Recovery = rec
+		}
+		payload.Baseline = computeBaseline(recs, payload.Recovery)
+
+		// Cycle last — use recovery.CycleID as the authoritative hint.
+		var hintID int64
+		if payload.Recovery != nil {
+			hintID = payload.Recovery.CycleID
+		}
+		cycles, err := wc.Cycles(ctx, rng, 25)
+		if err != nil {
+			b.deps.Logger.Warn("whoop cycles", "err", err)
+			apiErr = err
+		}
+		totalRecords += len(cycles)
+		if cy := pickCycle(cycles, day, dayEnd, hintID); cy != nil {
+			payload.Cycle = cy
 		}
 
 		wos, err := wc.Workouts(ctx, rng, 25)
@@ -151,12 +161,29 @@ func pickSleep(ss []domain.Sleep, day, dayEnd time.Time) *domain.Sleep {
 	return nap
 }
 
-// pickCycle returns the cycle whose Start falls within [day, dayEnd).
-func pickCycle(cs []domain.Cycle, day, dayEnd time.Time) *domain.Cycle {
+// pickCycle finds the cycle that represents the target day. Whoop's
+// cycle.Start is at the SLEEP ONSET of the previous night, not at wakeup,
+// so a strict "Start within [day, dayEnd)" filter would reject the right
+// record. Strategy:
+//  1. If hintID != 0 (passed from recovery.CycleID), match by ID — that's
+//     the authoritative link.
+//  2. Otherwise pick the cycle that overlaps the day, preferring the one
+//     whose Start is most recent before dayEnd.
+func pickCycle(cs []domain.Cycle, day, dayEnd time.Time, hintID int64) *domain.Cycle {
+	if hintID != 0 {
+		for i := range cs {
+			if cs[i].ID == hintID {
+				return &cs[i]
+			}
+		}
+	}
 	var out *domain.Cycle
 	for i := range cs {
 		c := cs[i]
-		if c.Start.Before(day) || !c.Start.Before(dayEnd) {
+		if !c.Start.Before(dayEnd) {
+			continue
+		}
+		if c.End != nil && !c.End.After(day) {
 			continue
 		}
 		if out == nil || c.Start.After(out.Start) {
@@ -166,18 +193,53 @@ func pickCycle(cs []domain.Cycle, day, dayEnd time.Time) *domain.Cycle {
 	return out
 }
 
-// pickRecovery picks the recovery matching the chosen cycle (preferred) or sleep.
-func pickRecovery(rs []domain.Recovery, cy *domain.Cycle, sl *domain.Sleep) *domain.Recovery {
-	for i := range rs {
-		r := rs[i]
-		if cy != nil && r.CycleID == cy.ID {
-			return &r
+// computeBaseline averages recoveries OTHER than the target day's, taking up
+// to 7 of them. Returns nil if there's nothing to average.
+func computeBaseline(recs []domain.Recovery, target *domain.Recovery) *Baseline {
+	var rs, hs, rrs float64
+	var n int
+	for _, r := range recs {
+		if r.Score == 0 && r.HRVMilli == 0 {
+			continue // unscored
+		}
+		if target != nil && r.CycleID == target.CycleID {
+			continue
+		}
+		rs += r.Score
+		hs += r.HRVMilli
+		rrs += r.RestingHR
+		n++
+		if n >= 7 {
+			break
 		}
 	}
-	for i := range rs {
-		r := rs[i]
-		if sl != nil && r.SleepID == sl.ExternalID {
-			return &r
+	if n == 0 {
+		return nil
+	}
+	return &Baseline{
+		Days:        n,
+		RecoveryAvg: rs / float64(n),
+		HRVAvg:      hs / float64(n),
+		RHRAvg:      rrs / float64(n),
+	}
+}
+
+// pickRecovery picks the recovery matching the chosen sleep (preferred)
+// or cycle. Sleep_id is the more reliable link — recoveries are scored per
+// sleep, and sleep_id is populated whether the recovery has been scored or not.
+func pickRecovery(rs []domain.Recovery, cy *domain.Cycle, sl *domain.Sleep) *domain.Recovery {
+	if sl != nil {
+		for i := range rs {
+			if rs[i].SleepID == sl.ExternalID {
+				return &rs[i]
+			}
+		}
+	}
+	if cy != nil {
+		for i := range rs {
+			if rs[i].CycleID == cy.ID {
+				return &rs[i]
+			}
 		}
 	}
 	return nil

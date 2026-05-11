@@ -13,6 +13,7 @@ import (
 	tele "gopkg.in/telebot.v3"
 
 	"fitlog/internal/auth"
+	"fitlog/internal/domain"
 	"fitlog/internal/fatsecret"
 	"fitlog/internal/whoop"
 )
@@ -20,13 +21,21 @@ import (
 // Deps bundles the bot's external collaborators. Held in a struct so handlers
 // can be methods on Bot rather than closures over a half-dozen vars.
 type Deps struct {
-	Tokens        *auth.TokenStore
-	OAuthConfig   *oauth2.Config
-	FatSecret     *fatsecret.Client
-	States        StateIssuer
-	Location      *time.Location
-	Logger        *slog.Logger
+	Tokens         *auth.TokenStore
+	Notes          NotesRepo
+	OAuthConfig    *oauth2.Config
+	FatSecret      *fatsecret.Client
+	States         StateIssuer
+	Location       *time.Location
+	Logger         *slog.Logger
 	NewWhoopClient func(ctx context.Context, ts oauth2.TokenSource) *whoop.Client
+}
+
+// NotesRepo is the slice of storage.NotesRepo the bot needs. Defined as an
+// interface so the bot package stays independent of pgx.
+type NotesRepo interface {
+	Insert(ctx context.Context, n domain.Note) (int64, error)
+	ListBetween(ctx context.Context, from, to time.Time) ([]domain.Note, error)
 }
 
 // StateIssuer is the slice of server.StateStore the bot needs.
@@ -98,6 +107,7 @@ func (b *Bot) registerHandlers() {
 	b.b.Handle("/start", b.handleStart)
 	b.b.Handle("/connect_whoop", b.handleConnectWhoop)
 	b.b.Handle("/info", b.handleInfo)
+	b.b.Handle("/log", b.handleLog)
 	b.b.Handle("/week", b.makePeriodHandler(7))
 	b.b.Handle("/month", b.makePeriodHandler(30))
 	b.b.Handle("/sleep", b.handleSleep)

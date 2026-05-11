@@ -14,9 +14,10 @@ import (
 const startMessage = `Привет\. Список команд:
 /connect\_whoop — подключить Whoop
 /info \[YYYY\-MM\-DD\] — подробный отчёт за день \(без даты — сегодня\)
-/week, /month — агрегаты
+/week, /month — агрегаты с дайджестом калорий
 /sleep, /recovery, /workouts \[N\] — только эти данные за N дней
 /food \[today\|yesterday\] — питание за день
+/log weight 105\.2 \| /log note текст \| /log symptom текст
 /status — состояние подключений`
 
 func (b *Bot) handleStart(c tele.Context) error {
