@@ -254,6 +254,99 @@ func pFloat(p *float64) float64 {
 // kjToKcal converts kilojoules → kilocalories.
 func kjToKcal(kj float64) float64 { return kj / 4.184 }
 
+// kcalPerKgFat is the conventional energy density of body fat used for rough
+// "fat lost / gained" estimates. It's an approximation (real value varies),
+// but ±7700 kcal per kg is the number every fitness app uses.
+const kcalPerKgFat = 7700.0
+
+// FormatPeriodDigest builds the "📊 Дайджест" block: consumed vs burned over
+// a multi-day window, with deficit/surplus verdict and a rough fat-mass delta.
+// Maps are keyed by FatSecret date_int (days since 1970-01-01 UTC) so the
+// per-day deficit counter can match nutrition to Whoop without TZ ambiguity.
+//
+// Returns empty string if there's nothing to show.
+func FormatPeriodDigest(consumedByDay, burnedByDay map[int]float64, days int) string {
+	var totalConsumed, totalBurned float64
+	for _, v := range consumedByDay {
+		totalConsumed += v
+	}
+	for _, v := range burnedByDay {
+		totalBurned += v
+	}
+	if totalConsumed == 0 && totalBurned == 0 {
+		return ""
+	}
+
+	d := float64(days)
+	if d == 0 {
+		d = 1
+	}
+	diff := totalConsumed - totalBurned
+	perDay := diff / d
+
+	verdict := "около нормы"
+	switch {
+	case perDay <= -300:
+		verdict = "дефицит ✅"
+	case perDay <= -100:
+		verdict = "лёгкий дефицит"
+	case perDay >= 300:
+		verdict = "профицит ⚠️"
+	case perDay >= 100:
+		verdict = "лёгкий профицит"
+	}
+
+	var b strings.Builder
+	b.WriteString("📊 *Дайджест*\n")
+	fmt.Fprintf(&b, "  Съедено: *%s kcal* \\(avg %s/день\\)\n",
+		fmtFloat(totalConsumed, 0), fmtFloat(totalConsumed/d, 0))
+	fmt.Fprintf(&b, "  Потрачено: *%s kcal* \\(avg %s/день\\)\n",
+		fmtFloat(totalBurned, 0), fmtFloat(totalBurned/d, 0))
+	fmt.Fprintf(&b, "  Баланс: *%s kcal* \\(%s/день\\) — %s\n",
+		mdv2Escape(fmt.Sprintf("%+.0f", diff)),
+		mdv2Escape(fmt.Sprintf("%+.0f", perDay)),
+		mdv2Escape(verdict))
+
+	// Fat-mass delta: negative diff (deficit) → fat lost.
+	fatKg := -diff / kcalPerKgFat
+	if fatKg > 0.01 {
+		fmt.Fprintf(&b, "  За жир: *\\-%s кг* \\(1 кг ≈ 7700 kcal\\)\n", fmtFloat(fatKg, 2))
+	} else if fatKg < -0.01 {
+		fmt.Fprintf(&b, "  За жир: *\\+%s кг* \\(1 кг ≈ 7700 kcal\\)\n", fmtFloat(-fatKg, 2))
+	}
+
+	// Per-day deficit/surplus counter — only for days that have BOTH numbers.
+	allDates := map[int]struct{}{}
+	for di := range consumedByDay {
+		allDates[di] = struct{}{}
+	}
+	for di := range burnedByDay {
+		allDates[di] = struct{}{}
+	}
+	var defDays, surDays, neutralDays int
+	for di := range allDates {
+		cv, ok1 := consumedByDay[di]
+		bv, ok2 := burnedByDay[di]
+		if !ok1 || !ok2 || cv == 0 || bv == 0 {
+			continue
+		}
+		switch dv := cv - bv; {
+		case dv < -100:
+			defDays++
+		case dv > 100:
+			surDays++
+		default:
+			neutralDays++
+		}
+	}
+	if defDays+surDays+neutralDays > 0 {
+		fmt.Fprintf(&b, "  Дни: дефицит %d · профицит %d · около нормы %d\n",
+			defDays, surDays, neutralDays)
+	}
+
+	return b.String()
+}
+
 // InfoPayload bundles the data the verbose day report renders from.
 type InfoPayload struct {
 	Day      time.Time

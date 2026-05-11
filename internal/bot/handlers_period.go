@@ -24,13 +24,20 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 		now := time.Now().In(loc)
 		rng := domain.Days(now, days)
 
-		var b2 strings.Builder
-		fmt.Fprintf(&b2, "📅 *Сводка за %d %s*\n\n", days, mdv2Escape(pluralDays(days)))
+		// Accumulators for the digest section, populated as we fetch.
+		burnedByDay := map[int]float64{}
+		consumedByDay := map[int]float64{}
+
+		var (
+			header strings.Builder
+			body   strings.Builder
+		)
+		fmt.Fprintf(&header, "📅 *Сводка за %d %s*\n\n", days, mdv2Escape(pluralDays(days)))
 
 		wc, err := b.loadWhoopClient(ctx)
 		switch {
 		case errors.Is(err, errWhoopNotConnected):
-			b2.WriteString("Whoop не подключён \\(/connect\\_whoop\\)\n\n")
+			body.WriteString("Whoop не подключён \\(/connect\\_whoop\\)\n\n")
 		case err != nil:
 			b.deps.Logger.Error("load whoop client", "err", err)
 		default:
@@ -41,6 +48,12 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 			cycles, err := wc.Cycles(ctx, rng, 25)
 			if err != nil {
 				b.deps.Logger.Warn("whoop cycles", "err", err)
+			}
+			for _, c := range cycles {
+				if c.Kilojoule > 0 {
+					di := fatsecret.ToDateInt(c.Start.In(loc))
+					burnedByDay[di] = kjToKcal(c.Kilojoule)
+				}
 			}
 			sleeps, err := wc.Sleeps(ctx, rng, 25)
 			if err != nil {
@@ -58,7 +71,7 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 					hrv += r.HRVMilli
 				}
 				avg := sum / float64(len(recs))
-				fmt.Fprintf(&b2, "💪 Recovery avg %s%% %s • HRV avg %s ms\n",
+				fmt.Fprintf(&body, "💪 Recovery avg %s%% %s • HRV avg %s ms\n",
 					fmtFloat(avg, 0), recoveryEmoji(avg), fmtFloat(hrv/float64(len(recs)), 0))
 			}
 
@@ -67,7 +80,7 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 				for _, c := range cycles {
 					total += c.Strain
 				}
-				fmt.Fprintf(&b2, "⚡ Total strain %s • avg %s\n",
+				fmt.Fprintf(&body, "⚡ Total strain %s • avg %s\n",
 					fmtFloat(total, 1), fmtFloat(total/float64(len(cycles)), 1))
 			}
 
@@ -85,16 +98,16 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 				}
 				if count > 0 {
 					avgMs := totalMs / int64(count)
-					fmt.Fprintf(&b2, "🌙 Sleep avg %s • performance %s%%\n",
+					fmt.Fprintf(&body, "🌙 Sleep avg %s • performance %s%%\n",
 						mdv2Escape(fmtDurationHM(avgMs)), fmtFloat(perfSum/float64(count), 0))
 				}
 			}
 
 			if len(workouts) > 0 {
-				b2.WriteString("\n🏋 *Топ тренировок*\n")
+				body.WriteString("\n🏋 *Топ тренировок*\n")
 				top := topWorkouts(workouts, 5)
 				for _, w := range top {
-					fmt.Fprintf(&b2, "  • %s %s · strain %s · %s\n",
+					fmt.Fprintf(&body, "  • %s %s · strain %s · %s\n",
 						mdv2Escape(fmtDate(w.Start, loc)),
 						mdv2Escape(w.SportName),
 						fmtFloat(w.Strain, 1),
@@ -114,6 +127,7 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 				if d.DateInt < fromInt {
 					continue
 				}
+				consumedByDay[d.DateInt] = d.Calories
 				cal += d.Calories
 				prot += d.Protein
 				fat += d.Fat
@@ -121,7 +135,7 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 				n++
 			}
 			if n > 0 {
-				fmt.Fprintf(&b2, "\n🥗 *Питание avg* %s / %sб / %sж / %sу\n",
+				fmt.Fprintf(&body, "\n🥗 *Питание avg* %s / %sб / %sж / %sу\n",
 					fmtFloat(cal/float64(n), 0),
 					fmtFloat(prot/float64(n), 0),
 					fmtFloat(fat/float64(n), 0),
@@ -129,7 +143,12 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 			}
 		}
 
-		return b.reply(c, strings.TrimRight(b2.String(), "\n"))
+		out := header.String()
+		if digest := FormatPeriodDigest(consumedByDay, burnedByDay, days); digest != "" {
+			out += digest + "\n"
+		}
+		out += body.String()
+		return b.reply(c, strings.TrimRight(out, "\n"))
 	}
 }
 

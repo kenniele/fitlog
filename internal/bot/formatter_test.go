@@ -108,6 +108,35 @@ func TestFormatInfo_EmptyShowsPlaceholders(t *testing.T) {
 	require.Contains(t, out, "Питание* — записей нет")
 }
 
+func TestFormatPeriodDigest_Deficit(t *testing.T) {
+	consumed := map[int]float64{1: 1800, 2: 1700, 3: 1850}
+	burned := map[int]float64{1: 2100, 2: 2200, 3: 2050}
+	out := FormatPeriodDigest(consumed, burned, 3)
+
+	require.Contains(t, out, "Дайджест")
+	require.Contains(t, out, "Съедено: *5350 kcal*")
+	require.Contains(t, out, "Потрачено: *6350 kcal*")
+	// 1800+1700+1850=5350; 2100+2200+2050=6350. diff=-1000, avg=-333/day.
+	require.Contains(t, out, "Баланс: *\\-1000 kcal*")
+	require.Contains(t, out, "дефицит ✅")
+	require.Contains(t, out, "За жир: *\\-0\\.13 кг*")
+	require.Contains(t, out, "Дни: дефицит 3 · профицит 0 · около нормы 0")
+}
+
+func TestFormatPeriodDigest_Empty(t *testing.T) {
+	require.Empty(t, FormatPeriodDigest(map[int]float64{}, map[int]float64{}, 7))
+}
+
+func TestFormatPeriodDigest_Surplus(t *testing.T) {
+	consumed := map[int]float64{1: 3000}
+	burned := map[int]float64{1: 2000}
+	out := FormatPeriodDigest(consumed, burned, 1)
+
+	require.Contains(t, out, "Баланс: *\\+1000 kcal*")
+	require.Contains(t, out, "профицит")
+	require.Contains(t, out, "За жир: *\\+0\\.13 кг*")
+}
+
 func TestCleanServing(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 
