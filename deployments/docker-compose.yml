@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fitlog-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fitlog
+      POSTGRES_PASSWORD: fitlog
+      POSTGRES_DB: fitlog
+    ports:
+      # Published on 5433 to avoid clashing with a local postgres that may
+      # already own 5432 on the host. Inside the compose network, the app
+      # still talks to postgres on its default port 5432.
+      - "55432:5432"
+    volumes:
+      - fitlog_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fitlog -d fitlog"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: fitlog-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgres://fitlog:fitlog@postgres:5432/fitlog?sslmode=disable
+      HTTP_ADDR: :8080
+    ports:
+      - "8080:8080"
+
+volumes:
+  fitlog_pgdata:

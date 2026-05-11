@@ -1,0 +1,19 @@
+.env
+.env.local
+*.local
+
+# Binaries
+/fitlog
+/bin/
+/dist/
+
+# Test/coverage
+*.test
+*.out
+coverage.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
