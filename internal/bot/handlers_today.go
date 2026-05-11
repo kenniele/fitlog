@@ -41,18 +41,24 @@ func (b *Bot) sendDayReport(c tele.Context, day time.Time) error {
 	wc, err := b.loadWhoopClient(ctx)
 	switch {
 	case errors.Is(err, errWhoopNotConnected):
-		// proceed without whoop data
+		payload.WhoopStatus = "Whoop не подключён — /connect_whoop"
 	case err != nil:
 		b.deps.Logger.Error("load whoop client", "err", err)
+		payload.WhoopStatus = "Whoop недоступен: " + err.Error()
 	default:
 		// 36h window centred on the target day captures the sleep that
 		// started the night before plus any straggling end-of-day data.
 		rng := domain.TimeRange{From: day.Add(-18 * time.Hour), To: dayEnd.Add(6 * time.Hour)}
 
+		var apiErr error
+		var totalRecords int
+
 		cycles, err := wc.Cycles(ctx, rng, 25)
 		if err != nil {
 			b.deps.Logger.Warn("whoop cycles", "err", err)
+			apiErr = err
 		}
+		totalRecords += len(cycles)
 		if cy := pickCycle(cycles, day, dayEnd); cy != nil {
 			payload.Cycle = cy
 		}
@@ -60,7 +66,9 @@ func (b *Bot) sendDayReport(c tele.Context, day time.Time) error {
 		sleeps, err := wc.Sleeps(ctx, rng, 25)
 		if err != nil {
 			b.deps.Logger.Warn("whoop sleeps", "err", err)
+			apiErr = err
 		}
+		totalRecords += len(sleeps)
 		if s := pickSleep(sleeps, day, dayEnd); s != nil {
 			payload.Sleep = s
 		}
@@ -68,7 +76,9 @@ func (b *Bot) sendDayReport(c tele.Context, day time.Time) error {
 		recs, err := wc.Recoveries(ctx, rng, 25)
 		if err != nil {
 			b.deps.Logger.Warn("whoop recoveries", "err", err)
+			apiErr = err
 		}
+		totalRecords += len(recs)
 		if rec := pickRecovery(recs, payload.Cycle, payload.Sleep); rec != nil {
 			payload.Recovery = rec
 		}
@@ -76,11 +86,23 @@ func (b *Bot) sendDayReport(c tele.Context, day time.Time) error {
 		wos, err := wc.Workouts(ctx, rng, 25)
 		if err != nil {
 			b.deps.Logger.Warn("whoop workouts", "err", err)
+			apiErr = err
 		}
+		totalRecords += len(wos)
 		for _, w := range wos {
 			if !w.Start.Before(day) && w.Start.Before(dayEnd) {
 				payload.Workouts = append(payload.Workouts, w)
 			}
+		}
+
+		switch {
+		case apiErr != nil && totalRecords == 0:
+			payload.WhoopStatus = "Whoop API вернул ошибку: " + apiErr.Error()
+		case totalRecords > 0 && payload.Cycle == nil && payload.Sleep == nil &&
+			payload.Recovery == nil && len(payload.Workouts) == 0:
+			payload.WhoopStatus = fmt.Sprintf(
+				"Whoop отдал %d записей, но ни одна не попала в выбранный день",
+				totalRecords)
 		}
 	}
 

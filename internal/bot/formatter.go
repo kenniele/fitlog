@@ -4,33 +4,92 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"fitlog/internal/domain"
 )
 
-// fatSecretCustomMarker matches FatSecret's ":custom:<id>" tokens that leak
-// into food_entry_description (e.g. "1.3 :custom:130s  г Тунец ...").
-var fatSecretCustomMarker = regexp.MustCompile(`:custom:\d+\w*`)
+// fatSecretCustomMarker captures the size value and (unused) unit code from
+// FatSecret's ":custom:<size><code>" token embedded in food_entry_description.
+// Examples in the wild:
+//
+//	"1.3 :custom:130s г Tuna ..." → size=130, code=s
+//	"1 :custom:1 котлета Котлета Домашняя" → size=1, code=""
+var fatSecretCustomMarker = regexp.MustCompile(`:custom:(\d+(?:\.\d+)?)([a-zA-Z]*)`)
 
-// cleanServing extracts a tidy serving string ("130 г", "2 medium", "1 mug")
-// from FatSecret's food_entry_description by stripping the :custom: token and
-// removing the food name (which FatSecret duplicates inside the description).
-// Falls back to "× <units>" if nothing else survives.
+// massVolumeLabels are unit labels for which "size == units" likely means
+// the user entered the value as raw mass/volume (e.g. "60 :custom:60s г").
+// In that case we collapse the redundant "60 г × 60" into just "60 г".
+var massVolumeLabels = map[string]bool{
+	"г": true, "g": true, "мл": true, "ml": true, "kg": true, "кг": true,
+}
+
+func fmtUnitsCompact(u float64) string {
+	s := fmt.Sprintf("%.2f", u)
+	return strings.TrimRight(strings.TrimRight(s, "0"), ".")
+}
+
+// cleanServing turns FatSecret's noisy food_entry_description into a tidy
+// human label by parsing the :custom: marker for the serving size, stripping
+// the duplicated food name, and rejoining what's left.
+//
+// Output by example:
+//
+//	"1.3 :custom:130s г Fish House Тунец"     name=Fish House Тунец      → "130 г × 1.3"
+//	"60 :custom:60s г Сырники"                name=Сырники              → "60 г"      (size==units, mass label)
+//	"1 :custom:1 котлета Котлета Домашняя"    name=Котлета Домашняя     → "1 котлета"
+//	"2 medium Вареное Яйцо"                   name=Вареное Яйцо         → "2 medium"
+//	"1 mug Кофе с Сахаром"                    name=Кофе с Сахаром       → "1 mug"
 func cleanServing(desc, name string, units *float64) string {
-	s := desc
-	if name != "" {
-		s = strings.ReplaceAll(s, name, "")
+	if desc == "" {
+		if units != nil && *units != 0 {
+			return "× " + fmtUnitsCompact(*units)
+		}
+		return ""
 	}
-	s = fatSecretCustomMarker.ReplaceAllString(s, "")
-	s = strings.Join(strings.Fields(s), " ")
-	s = strings.Trim(s, " ,")
-	if s == "" && units != nil {
-		return fmt.Sprintf("× %s", strings.TrimRight(strings.TrimRight(
-			fmt.Sprintf("%.2f", *units), "0"), "."))
+
+	stripName := func(s string) string {
+		if name != "" {
+			s = strings.ReplaceAll(s, name, "")
+		}
+		return strings.Join(strings.Fields(s), " ")
 	}
-	return s
+
+	loc := fatSecretCustomMarker.FindStringSubmatchIndex(desc)
+	if loc == nil {
+		// Built-in serving description like "2 medium" or "1 mug".
+		out := stripName(desc)
+		out = strings.Trim(out, " ,")
+		if out != "" {
+			return out
+		}
+		if units != nil && *units != 0 {
+			return "× " + fmtUnitsCompact(*units)
+		}
+		return ""
+	}
+
+	size := desc[loc[2]:loc[3]] // first capture group
+	after := stripName(desc[loc[1]:])
+
+	u := 0.0
+	if units != nil {
+		u = *units
+	}
+
+	// Heuristic: "60 :custom:60s г" means user entered raw grams. Collapse.
+	if u > 0 && massVolumeLabels[after] {
+		if sf, err := strconv.ParseFloat(size, 64); err == nil && sf == u {
+			return strings.TrimSpace(size + " " + after)
+		}
+	}
+
+	if u == 0 || u == 1 {
+		return strings.TrimSpace(size + " " + after)
+	}
+	return strings.TrimSpace(size + " " + after + " × " + fmtUnitsCompact(u))
 }
 
 // telegramMessageLimit is the hard cap on a single MarkdownV2 message.
@@ -204,6 +263,10 @@ type InfoPayload struct {
 	Sleep    *domain.Sleep
 	Workouts []domain.Workout
 	Meals    []domain.MealEntry
+
+	// WhoopStatus describes the outcome of Whoop API calls so the user knows
+	// whether "данных нет" means "Whoop вернул пусто" or "не удалось получить".
+	WhoopStatus string
 }
 
 // FormatInfo renders a long, narrative day report touching every field we
@@ -213,6 +276,10 @@ func FormatInfo(p InfoPayload) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "📊 *%s*\n\n", mdv2Escape(fmtDateLong(p.Day, p.Loc)))
+
+	if p.WhoopStatus != "" {
+		fmt.Fprintf(&b, "⚠️ %s\n\n", mdv2Escape(p.WhoopStatus))
+	}
 
 	if p.Sleep != nil {
 		writeSleep(&b, p.Sleep, p.Loc)

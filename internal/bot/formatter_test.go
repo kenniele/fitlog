@@ -108,6 +108,34 @@ func TestFormatInfo_EmptyShowsPlaceholders(t *testing.T) {
 	require.Contains(t, out, "Питание* — записей нет")
 }
 
+func TestCleanServing(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+
+	cases := []struct {
+		desc, name string
+		units      *float64
+		want       string
+	}{
+		// :custom: tag with mass label & multiplier > 1 → show "size label × units"
+		{"1.3 :custom:130s  г Fish House Тунец", "Fish House Тунец", f(1.3), "130 г × 1.3"},
+		{"2 1/2 :custom:250s  г Йогурт", "Йогурт", f(2.5), "250 г × 2.5"},
+		// units == size && mass label → user typed raw grams; collapse.
+		{"60 :custom:60s  г Сырники", "Сырники", f(60), "60 г"},
+		// :custom: with non-numeric label, units == 1 → drop "× 1".
+		{"1 :custom:1 котлета Котлета Домашняя", "Котлета Домашняя", f(1), "1 котлета"},
+		{"1 :custom:1 обычный ломтик Хлеб Черный", "Хлеб Черный", f(1), "1 обычный ломтик"},
+		// No :custom: marker — built-in serving description.
+		{"2 medium Вареное Яйцо", "Вареное Яйцо", f(2), "2 medium"},
+		{"1 mug Кофе с Сахаром", "Кофе с Сахаром", f(1), "1 mug"},
+		// Empty description with units → at least show the units.
+		{"", "X", f(1.5), "× 1.5"},
+	}
+	for _, tc := range cases {
+		got := cleanServing(tc.desc, tc.name, tc.units)
+		require.Equal(t, tc.want, got, "desc=%q name=%q", tc.desc, tc.name)
+	}
+}
+
 func TestSplitForTelegram_Short(t *testing.T) {
 	chunks := SplitForTelegram("hello")
 	require.Equal(t, []string{"hello"}, chunks)
