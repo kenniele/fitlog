@@ -53,3 +53,12 @@ docker-logs: ## Tail app logs
 
 clean: ## Remove build artifacts
 	rm -rf bin/ dist/
+
+# Deploy: `make deploy DEPLOY_HOST=fitlog@1.2.3.4`
+deploy: ## Pull & rebuild on the remote host (set DEPLOY_HOST=user@ip)
+	@if [ -z "$(DEPLOY_HOST)" ]; then echo "set DEPLOY_HOST=user@ip"; exit 1; fi
+	ssh $(DEPLOY_HOST) 'cd ~/fitlog && git pull && docker compose -f deployments/docker-compose.yml up -d --build && docker compose -f deployments/docker-compose.yml logs --tail=20 app'
+
+deploy-logs: ## Tail app logs on the remote host
+	@if [ -z "$(DEPLOY_HOST)" ]; then echo "set DEPLOY_HOST=user@ip"; exit 1; fi
+	ssh $(DEPLOY_HOST) 'docker compose -f ~/fitlog/deployments/docker-compose.yml logs -f --tail=100 app'
