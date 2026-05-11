@@ -304,7 +304,7 @@ func writeCycle(b *strings.Builder, c *domain.Cycle, loc *time.Location) {
 		fmt.Fprintf(b, "  Цикл стартовал в %s, ещё идёт\\.\n", mdv2Escape(fmtClock(c.Start, loc)))
 	}
 	fmt.Fprintf(b, "  HR avg %s bpm, max %s bpm\\.\n", fmtFloat(c.AvgHR, 0), fmtFloat(c.MaxHR, 0))
-	fmt.Fprintf(b, "  Энергозатраты: %s kJ \\(~%s kcal\\)\\.\n",
+	fmt.Fprintf(b, "  Энергозатраты: %s kJ \\(\\~%s kcal\\)\\.\n",
 		fmtFloat(c.Kilojoule, 0), fmtFloat(kjToKcal(c.Kilojoule), 0))
 	if c.ScoreState != "" {
 		fmt.Fprintf(b, "  Score state: %s\\.\n", mdv2Escape(c.ScoreState))
@@ -325,7 +325,7 @@ func writeWorkouts(b *strings.Builder, ws []domain.Workout, loc *time.Location) 
 			mdv2Escape(fmtDurationHM(dur.Milliseconds())))
 		fmt.Fprintf(b, "   Strain %s %s\\.\n", fmtFloat(w.Strain, 1), strainEmoji(w.Strain))
 		fmt.Fprintf(b, "   HR avg %s, max %s\\.\n", fmtFloat(w.AvgHR, 0), fmtFloat(w.MaxHR, 0))
-		fmt.Fprintf(b, "   %s kJ \\(~%s kcal\\)\\.\n",
+		fmt.Fprintf(b, "   %s kJ \\(\\~%s kcal\\)\\.\n",
 			fmtFloat(w.Kilojoule, 0), fmtFloat(kjToKcal(w.Kilojoule), 0))
 		fmt.Fprintf(b, "   Записано: %s%%\\.\n", fmtFloat(w.PercentRecorded, 0))
 		if w.DistanceM != nil && *w.DistanceM > 0 {
