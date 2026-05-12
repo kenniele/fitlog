@@ -17,6 +17,7 @@ type Note struct {
 // NoteKindNote, but these are the canonical ones rendered specially.
 const (
 	NoteKindWeight  = "weight"
+	NoteKindWaist   = "waist"
 	NoteKindNote    = "note"
 	NoteKindSymptom = "symptom"
 )

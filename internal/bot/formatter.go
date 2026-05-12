@@ -756,15 +756,9 @@ func FormatNotes(ns []domain.Note, loc *time.Location) string {
 		clock := fmtClock(n.Ts, loc)
 		switch n.Kind {
 		case domain.NoteKindWeight:
-			val := "—"
-			if n.Value != nil {
-				val = fmtFloat(*n.Value, 2)
-			}
-			line := fmt.Sprintf("  • %s · вес *%s кг*", date, val)
-			if n.Body != "" {
-				line += " · " + mdv2Escape(n.Body)
-			}
-			b.WriteString(mdv2EscapePrefix(line) + "\n")
+			b.WriteString(numericNoteLine(date, "вес", n.Value, "кг", n.Body))
+		case domain.NoteKindWaist:
+			b.WriteString(numericNoteLine(date, "талия", n.Value, "см", n.Body))
 		case domain.NoteKindSymptom:
 			b.WriteString(fmt.Sprintf("  • %s %s · 🩹 %s\n",
 				mdv2Escape(date), mdv2Escape(clock), mdv2Escape(n.Body)))
@@ -774,6 +768,20 @@ func FormatNotes(ns []domain.Note, loc *time.Location) string {
 		}
 	}
 	return b.String()
+}
+
+// numericNoteLine renders one row for a measurement-style note (weight, waist).
+// The value goes in bold; the date and any trailing comment are plain text.
+func numericNoteLine(date, label string, value *float64, unit, body string) string {
+	val := "—"
+	if value != nil {
+		val = fmtFloat(*value, 2)
+	}
+	line := fmt.Sprintf("  • %s · %s *%s %s*", date, label, val, unit)
+	if body != "" {
+		line += " · " + mdv2Escape(body)
+	}
+	return mdv2EscapePrefix(line) + "\n"
 }
 
 // mdv2EscapePrefix escapes the parts of a pre-built line that we DIDN'T

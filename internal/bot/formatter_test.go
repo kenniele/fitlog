@@ -122,14 +122,17 @@ func TestFormatNotes(t *testing.T) {
 	loc := time.UTC
 	ts := time.Date(2026, 5, 11, 8, 30, 0, 0, loc)
 	w := 105.2
+	waist := 92.5
 	ns := []domain.Note{
 		{Ts: ts, Kind: domain.NoteKindWeight, Value: &w, Body: "натощак"},
+		{Ts: ts.Add(1 * time.Hour), Kind: domain.NoteKindWaist, Value: &waist},
 		{Ts: ts.Add(2 * time.Hour), Kind: domain.NoteKindSymptom, Body: "горло першит"},
 		{Ts: ts.Add(4 * time.Hour), Kind: domain.NoteKindNote, Body: "Усталость в ногах"},
 	}
 	out := FormatNotes(ns, loc)
 	require.Contains(t, out, "*Заметки*")
 	require.Contains(t, out, "вес *105\\.2 кг*")
+	require.Contains(t, out, "талия *92\\.5 см*")
 	require.Contains(t, out, "натощак")
 	require.Contains(t, out, "🩹")
 	require.Contains(t, out, "горло першит")
