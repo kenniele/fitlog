@@ -11,14 +11,31 @@ import (
 	"fitlog/internal/auth"
 )
 
-const startMessage = `Привет\. Список команд:
-/connect\_whoop — подключить Whoop
-/info \[YYYY\-MM\-DD\] — подробный отчёт за день \(без даты — сегодня\)
-/week, /month — агрегаты с дайджестом калорий
-/sleep, /recovery, /workouts \[N\] — только эти данные за N дней
-/food \[today\|yesterday\] — питание за день
-/log weight 105\.2 \| /log waist 92\.5 \| /log bodyfat 22\.4 \| /log note текст \| /log symptom текст
-/status — состояние подключений`
+const startMessage = `*fitlog* — личный фитнес\-бот\.
+
+📊 *Сводки*
+/info — подробный отчёт за сегодня
+/info 2026\-05\-13 — отчёт за конкретную дату
+/week — агрегаты за 7 дней \+ дайджест калорий
+/month — то же за 30 дней
+
+🔍 *Срезы*
+/sleep \[N\] — сон за N дней \(default 7\)
+/recovery \[N\] — recovery с HRV\-трендом
+/workouts \[N\] — тренировки
+/food \[today\|yesterday\] — питание
+
+📝 *Заметки*
+/log weight 105\.2 — вес \(кг\)
+/log waist 92\.5 — талия \(см\)
+/log bodyfat 22\.4 — процент жира
+/log note \<текст\> — произвольная заметка
+/log symptom \<текст\> — симптом / самочувствие
+
+⚙️ *Подключения*
+/connect\_whoop — OAuth с Whoop
+/status — проверка Whoop и FatSecret
+/help — эта подсказка`
 
 func (b *Bot) handleStart(c tele.Context) error {
 	return b.reply(c, startMessage)

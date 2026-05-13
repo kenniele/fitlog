@@ -71,7 +71,33 @@ func New(token string, allowlist *Allowlist, deps Deps) (*Bot, error) {
 
 	bot := &Bot{b: tb, deps: deps}
 	bot.registerHandlers()
+
+	// Publish the command list to Telegram so they appear in the "/"
+	// auto-suggest menu and get highlighted in chat. Best-effort: a network
+	// blip here shouldn't stop the bot from starting.
+	if err := tb.SetCommands(botCommands()); err != nil {
+		deps.Logger.Warn("set telegram commands", "err", err)
+	}
+
 	return bot, nil
+}
+
+// botCommands returns the slash commands shown in Telegram's UI. Order matters —
+// it's the order the user sees in the menu.
+func botCommands() []tele.Command {
+	return []tele.Command{
+		{Text: "info", Description: "Подробный отчёт за день (можно с датой)"},
+		{Text: "week", Description: "Сводка за 7 дней + дайджест калорий"},
+		{Text: "month", Description: "Сводка за 30 дней + дайджест калорий"},
+		{Text: "sleep", Description: "Сон за N дней (default 7)"},
+		{Text: "recovery", Description: "Recovery за N дней с трендом HRV"},
+		{Text: "workouts", Description: "Тренировки за N дней"},
+		{Text: "food", Description: "Питание за день (today/yesterday)"},
+		{Text: "log", Description: "Записать вес / талию / %жира / заметку"},
+		{Text: "status", Description: "Состояние подключений Whoop и FatSecret"},
+		{Text: "connect_whoop", Description: "Подключить Whoop через OAuth"},
+		{Text: "help", Description: "Показать список команд"},
+	}
 }
 
 // Start runs the long-poll loop. Blocks until ctx is cancelled or Stop is called.
@@ -105,6 +131,7 @@ func (b *Bot) NotifyOAuthFailure(_ context.Context, chatID int64, reason string)
 
 func (b *Bot) registerHandlers() {
 	b.b.Handle("/start", b.handleStart)
+	b.b.Handle("/help", b.handleStart)
 	b.b.Handle("/connect_whoop", b.handleConnectWhoop)
 	b.b.Handle("/info", b.handleInfo)
 	b.b.Handle("/log", b.handleLog)
