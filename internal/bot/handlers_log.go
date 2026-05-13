@@ -15,6 +15,7 @@ import (
 const logUsage = "Использование:\n" +
 	"  /log weight 105.2 — записать вес (кг)\n" +
 	"  /log waist 92.5 — записать обхват талии (см)\n" +
+	"  /log bodyfat 22.4 — записать процент жира (%)\n" +
 	"  /log note <текст> — произвольная заметка\n" +
 	"  /log symptom <текст> — симптом / самочувствие"
 
@@ -37,7 +38,7 @@ func (b *Bot) handleLog(c tele.Context) error {
 	note := domain.Note{Ts: time.Now()}
 
 	switch kind {
-	case domain.NoteKindWeight, domain.NoteKindWaist:
+	case domain.NoteKindWeight, domain.NoteKindWaist, domain.NoteKindBodyfat:
 		if tail == "" {
 			return b.reply(c, mdv2Escape("Формат: /log "+kind+" <число>"))
 		}
@@ -84,6 +85,8 @@ func formatNoteAck(n domain.Note) string {
 		return numericAck("вес", *n.Value, "кг", n.Body)
 	case domain.NoteKindWaist:
 		return numericAck("талия", *n.Value, "см", n.Body)
+	case domain.NoteKindBodyfat:
+		return numericAck("процент жира", *n.Value, "%", n.Body)
 	case domain.NoteKindSymptom:
 		return "✓ Записал симптом: " + n.Body
 	default:

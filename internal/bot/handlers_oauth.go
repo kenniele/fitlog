@@ -17,7 +17,7 @@ const startMessage = `Привет\. Список команд:
 /week, /month — агрегаты с дайджестом калорий
 /sleep, /recovery, /workouts \[N\] — только эти данные за N дней
 /food \[today\|yesterday\] — питание за день
-/log weight 105\.2 \| /log waist 92\.5 \| /log note текст \| /log symptom текст
+/log weight 105\.2 \| /log waist 92\.5 \| /log bodyfat 22\.4 \| /log note текст \| /log symptom текст
 /status — состояние подключений`
 
 func (b *Bot) handleStart(c tele.Context) error {

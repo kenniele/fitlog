@@ -759,6 +759,8 @@ func FormatNotes(ns []domain.Note, loc *time.Location) string {
 			b.WriteString(numericNoteLine(date, "вес", n.Value, "кг", n.Body))
 		case domain.NoteKindWaist:
 			b.WriteString(numericNoteLine(date, "талия", n.Value, "см", n.Body))
+		case domain.NoteKindBodyfat:
+			b.WriteString(numericNoteLine(date, "жир", n.Value, "%", n.Body))
 		case domain.NoteKindSymptom:
 			b.WriteString(fmt.Sprintf("  • %s %s · 🩹 %s\n",
 				mdv2Escape(date), mdv2Escape(clock), mdv2Escape(n.Body)))

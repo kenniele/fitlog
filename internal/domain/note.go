@@ -18,6 +18,7 @@ type Note struct {
 const (
 	NoteKindWeight  = "weight"
 	NoteKindWaist   = "waist"
+	NoteKindBodyfat = "bodyfat"
 	NoteKindNote    = "note"
 	NoteKindSymptom = "symptom"
 )
