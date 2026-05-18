@@ -22,7 +22,12 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 
 		loc := b.deps.Location
 		now := time.Now().In(loc)
-		rng := domain.Days(now, days)
+		// Period covers the last N FULL days, not including today (today is
+		// partial and would skew averages). To = midnight of today in user TZ
+		// (i.e. end of yesterday), From = N days before that.
+		to := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+		from := to.AddDate(0, 0, -days)
+		rng := domain.TimeRange{From: from, To: to}
 
 		// Accumulators for the digest section, populated as we fetch.
 		burnedByDay := map[int]float64{}
@@ -32,7 +37,11 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 			header strings.Builder
 			body   strings.Builder
 		)
-		fmt.Fprintf(&header, "📅 *Сводка за %d %s*\n\n", days, mdv2Escape(pluralDays(days)))
+		// Show the inclusive date range so it's obvious we don't include today.
+		toLabel := to.AddDate(0, 0, -1) // last full day in the window
+		fmt.Fprintf(&header, "📅 *Сводка за %d %s* \\(%s — %s\\)\n\n",
+			days, mdv2Escape(pluralDays(days)),
+			mdv2Escape(fmtDate(from, loc)), mdv2Escape(fmtDate(toLabel, loc)))
 
 		wc, err := b.loadWhoopClient(ctx)
 		switch {
@@ -50,10 +59,11 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 				b.deps.Logger.Warn("whoop cycles", "err", err)
 			}
 			for _, c := range cycles {
-				if c.Kilojoule > 0 {
-					di := fatsecret.ToDateInt(c.Start.In(loc))
-					burnedByDay[di] = kjToKcal(c.Kilojoule)
+				if c.Kilojoule == 0 {
+					continue
 				}
+				di := fatsecret.ToDateInt(cycleAnchor(c).In(loc))
+				burnedByDay[di] = kjToKcal(c.Kilojoule)
 			}
 			sleeps, err := wc.Sleeps(ctx, rng, 25)
 			if err != nil {
@@ -117,14 +127,16 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 		}
 
 		// Macros — sum DailyNutrition from FatSecret over the period.
-		if monthly, err := b.deps.FatSecret.FoodEntriesMonth(ctx, now); err != nil {
+		// Fetch via 'to' (yesterday) so we always hit the right month rollup.
+		if monthly, err := b.deps.FatSecret.FoodEntriesMonth(ctx, to.AddDate(0, 0, -1)); err != nil {
 			b.deps.Logger.Warn("fatsecret month", "err", err)
 		} else {
-			fromInt := fatSecretCutoff(now, days, loc)
+			fromInt := fatsecret.ToDateInt(from)
+			toInt := fatsecret.ToDateInt(to) // exclusive — today not counted
 			var cal, prot, fat, carbs float64
 			n := 0
 			for _, d := range monthly {
-				if d.DateInt < fromInt {
+				if d.DateInt < fromInt || d.DateInt >= toInt {
 					continue
 				}
 				consumedByDay[d.DateInt] = d.Calories
@@ -145,8 +157,7 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 
 		// Notes for the period — newest first.
 		if b.deps.Notes != nil {
-			notesFrom := now.AddDate(0, 0, -days)
-			if ns, err := b.deps.Notes.ListBetween(ctx, notesFrom, now); err != nil {
+			if ns, err := b.deps.Notes.ListBetween(ctx, from, to); err != nil {
 				b.deps.Logger.Warn("list notes", "err", err)
 			} else if len(ns) > 0 {
 				body.WriteString(FormatNotes(ns, loc))
@@ -187,11 +198,18 @@ func topWorkouts(ws []domain.Workout, n int) []domain.Workout {
 	return sorted
 }
 
-// fatSecretCutoff returns the inclusive lower bound dateInt for last-N-days
-// using the calendar date in now's location (delegates to fatsecret.ToDateInt
-// so the local-vs-UTC quirk lives in one place).
-func fatSecretCutoff(now time.Time, days int, _ *time.Location) int {
-	return fatsecret.ToDateInt(now.AddDate(0, 0, -days))
+// cycleAnchor returns the "anchor moment" for attributing a Whoop cycle to a
+// calendar day. cycle.Start is the previous evening's sleep onset, so it
+// belongs to the WRONG calendar day for day-level accounting. Better:
+//   - If End is set (cycle finished), anchor 1h before End → squarely inside
+//     the day the cycle represents.
+//   - Otherwise (in-progress cycle), anchor Start + 12h → next morning, also
+//     in the right calendar day.
+func cycleAnchor(c domain.Cycle) time.Time {
+	if c.End != nil {
+		return c.End.Add(-time.Hour)
+	}
+	return c.Start.Add(12 * time.Hour)
 }
 
 func (b *Bot) handleSleep(c tele.Context) error {
