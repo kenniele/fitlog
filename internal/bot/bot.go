@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -54,8 +55,13 @@ type Bot struct {
 // New builds a Bot. The telebot is created with long-polling; no webhook.
 func New(token string, allowlist *Allowlist, deps Deps) (*Bot, error) {
 	tb, err := tele.NewBot(tele.Settings{
-		Token:  token,
-		Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+		Token: token,
+		// Single-user bot: process updates serially. Besides keeping things
+		// simple, this prevents concurrent handlers from each refreshing the
+		// rotating Whoop refresh token at once, which would invalidate it and
+		// force a re-auth.
+		Synchronous: true,
+		Poller:      &tele.LongPoller{Timeout: 10 * time.Second},
 		OnError: func(err error, c tele.Context) {
 			deps.Logger.Error("telebot handler error", "err", err)
 			if c != nil {
@@ -67,6 +73,11 @@ func New(token string, allowlist *Allowlist, deps Deps) (*Bot, error) {
 		return nil, fmt.Errorf("telebot init: %w", err)
 	}
 
+	// Recover from a handler panic and route it through OnError instead of
+	// letting it unwind the goroutine and crash the whole process (which would
+	// also take down the OAuth callback server). Registered first so it also
+	// guards the allowlist middleware.
+	tb.Use(recoverMiddleware(deps.Logger))
 	tb.Use(allowlist.Middleware())
 
 	bot := &Bot{b: tb, deps: deps}
@@ -144,7 +155,29 @@ func (b *Bot) registerHandlers() {
 	b.b.Handle("/status", b.handleStatus)
 }
 
-// argInt parses the first positional argument as an int, or returns def.
+// recoverMiddleware turns a panic in any handler into a returned error, so
+// telebot's OnError reports it and the process keeps running.
+func recoverMiddleware(logger *slog.Logger) tele.MiddlewareFunc {
+	return func(next tele.HandlerFunc) tele.HandlerFunc {
+		return func(c tele.Context) (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("handler panic", "panic", r, "stack", string(debug.Stack()))
+					err = fmt.Errorf("panic: %v", r)
+				}
+			}()
+			return next(c)
+		}
+	}
+}
+
+// maxArgDays bounds the day-count argument for /sleep, /recovery, /workouts.
+// Whoop pagination returns at most maxPages*limit records; a far larger window
+// would silently truncate, so we clamp the request instead.
+const maxArgDays = 90
+
+// argInt parses the first positional argument as an int in [1, maxArgDays],
+// or returns def.
 func argInt(c tele.Context, def int) int {
 	args := c.Args()
 	if len(args) == 0 {
@@ -153,6 +186,9 @@ func argInt(c tele.Context, def int) int {
 	n, err := strconv.Atoi(strings.TrimSpace(args[0]))
 	if err != nil || n <= 0 {
 		return def
+	}
+	if n > maxArgDays {
+		return maxArgDays
 	}
 	return n
 }
@@ -181,7 +217,7 @@ func (b *Bot) loadWhoopClient(ctx context.Context) (*whoop.Client, error) {
 		RefreshToken: tok.RefreshToken,
 		Expiry:       tok.ExpiresAt,
 	}
-	ts := whoop.MakeTokenSource(ctx, b.deps.OAuthConfig, initial, func(updated *oauth2.Token) {
+	ts := whoop.MakeTokenSource(ctx, b.deps.OAuthConfig, initial, func(updated *oauth2.Token) { //nolint:contextcheck // persist fires during async token refresh and must outlive the request ctx.
 		saveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := b.deps.Tokens.Save(saveCtx, auth.SourceWhoop, &auth.Token{

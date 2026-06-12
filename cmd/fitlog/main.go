@@ -106,7 +106,7 @@ func run(parent context.Context) error {
 			return whoop.NewClientWithTokenSource(ctx, ts, whoop.Options{})
 		},
 	}
-	tb, err := bot.New(cfg.TelegramBotToken, allowlist, deps)
+	tb, err := bot.New(cfg.TelegramBotToken, allowlist, deps) //nolint:contextcheck // telebot HandlerFunc has no inheritable context.Context; handlers create their own.
 	if err != nil {
 		return fmt.Errorf("bot: %w", err)
 	}
@@ -153,9 +153,10 @@ func run(parent context.Context) error {
 	<-botDone
 
 	// HTTP graceful shutdown.
+	// Graceful shutdown needs a fresh ctx: the parent is already cancelled here.
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutCancel()
-	if err := httpSrv.Shutdown(shutCtx); err != nil {
+	if err := httpSrv.Shutdown(shutCtx); err != nil { //nolint:contextcheck // intentional fresh ctx, see above.
 		logger.Warn("http shutdown", "err", err)
 	}
 

@@ -51,10 +51,15 @@ func cleanServing(desc, name string, units *float64) string {
 	}
 
 	stripName := func(s string) string {
+		// Collapse whitespace first so the multi-space gap in
+		// ":custom:130s  г Name" doesn't defeat the suffix match, then trim
+		// ONLY the trailing duplicated food name. ReplaceAll would wrongly
+		// delete the name everywhere it appears (e.g. inside the unit word).
+		s = strings.Join(strings.Fields(s), " ")
 		if name != "" {
-			s = strings.ReplaceAll(s, name, "")
+			s = strings.TrimSpace(strings.TrimSuffix(s, name))
 		}
-		return strings.Join(strings.Fields(s), " ")
+		return s
 	}
 
 	loc := fatSecretCustomMarker.FindStringSubmatchIndex(desc)
@@ -266,21 +271,38 @@ const kcalPerKgFat = 7700.0
 //
 // Returns empty string if there's nothing to show.
 func FormatPeriodDigest(consumedByDay, burnedByDay map[int]float64, days int) string {
+	// The energy balance is only meaningful for days that have BOTH an intake
+	// and an expenditure figure. Summing intake over food-logged days but
+	// expenditure over a different (usually larger) set of Whoop days makes the
+	// deficit, the per-day averages and the fat-mass delta apples-to-oranges —
+	// that's why "Съедено avg" used to disagree with "Питание avg" and the
+	// balance looked like a huge phantom deficit. Restrict everything to the
+	// days present in both maps and divide by THAT count.
 	var totalConsumed, totalBurned float64
-	for _, v := range consumedByDay {
-		totalConsumed += v
+	var defDays, surDays, neutralDays int
+	both := 0
+	for di, cv := range consumedByDay {
+		bv, ok := burnedByDay[di]
+		if !ok || cv == 0 || bv == 0 {
+			continue
+		}
+		totalConsumed += cv
+		totalBurned += bv
+		both++
+		switch dv := cv - bv; {
+		case dv < -100:
+			defDays++
+		case dv > 100:
+			surDays++
+		default:
+			neutralDays++
+		}
 	}
-	for _, v := range burnedByDay {
-		totalBurned += v
-	}
-	if totalConsumed == 0 && totalBurned == 0 {
+	if both == 0 {
 		return ""
 	}
 
-	d := float64(days)
-	if d == 0 {
-		d = 1
-	}
+	d := float64(both)
 	diff := totalConsumed - totalBurned
 	perDay := diff / d
 
@@ -297,7 +319,12 @@ func FormatPeriodDigest(consumedByDay, burnedByDay map[int]float64, days int) st
 	}
 
 	var b strings.Builder
-	b.WriteString("📊 *Дайджест*\n")
+	b.WriteString("📊 *Дайджест*")
+	// Make it honest when fewer days had complete data than the requested window.
+	if both < days {
+		fmt.Fprintf(&b, " \\(по %d %s с данными\\)", both, pluralDays(both))
+	}
+	b.WriteString("\n")
 	fmt.Fprintf(&b, "  Съедено: *%s kcal* \\(avg %s/день\\)\n",
 		fmtFloat(totalConsumed, 0), fmtFloat(totalConsumed/d, 0))
 	fmt.Fprintf(&b, "  Потрачено: *%s kcal* \\(avg %s/день\\)\n",
@@ -315,34 +342,8 @@ func FormatPeriodDigest(consumedByDay, burnedByDay map[int]float64, days int) st
 		fmt.Fprintf(&b, "  За жир: *\\+%s кг* \\(1 кг ≈ 7700 kcal\\)\n", fmtFloat(-fatKg, 2))
 	}
 
-	// Per-day deficit/surplus counter — only for days that have BOTH numbers.
-	allDates := map[int]struct{}{}
-	for di := range consumedByDay {
-		allDates[di] = struct{}{}
-	}
-	for di := range burnedByDay {
-		allDates[di] = struct{}{}
-	}
-	var defDays, surDays, neutralDays int
-	for di := range allDates {
-		cv, ok1 := consumedByDay[di]
-		bv, ok2 := burnedByDay[di]
-		if !ok1 || !ok2 || cv == 0 || bv == 0 {
-			continue
-		}
-		switch dv := cv - bv; {
-		case dv < -100:
-			defDays++
-		case dv > 100:
-			surDays++
-		default:
-			neutralDays++
-		}
-	}
-	if defDays+surDays+neutralDays > 0 {
-		fmt.Fprintf(&b, "  Дни: дефицит %d · профицит %d · около нормы %d\n",
-			defDays, surDays, neutralDays)
-	}
+	fmt.Fprintf(&b, "  Дни: дефицит %d · профицит %d · около нормы %d\n",
+		defDays, surDays, neutralDays)
 
 	return b.String()
 }
@@ -762,43 +763,33 @@ func FormatNotes(ns []domain.Note, loc *time.Location) string {
 		case domain.NoteKindBodyfat:
 			b.WriteString(numericNoteLine(date, "жир", n.Value, "%", n.Body))
 		case domain.NoteKindSymptom:
-			b.WriteString(fmt.Sprintf("  • %s %s · 🩹 %s\n",
-				mdv2Escape(date), mdv2Escape(clock), mdv2Escape(n.Body)))
+			fmt.Fprintf(&b, "  • %s %s · 🩹 %s\n",
+				mdv2Escape(date), mdv2Escape(clock), mdv2Escape(n.Body))
 		default:
-			b.WriteString(fmt.Sprintf("  • %s %s · %s\n",
-				mdv2Escape(date), mdv2Escape(clock), mdv2Escape(n.Body)))
+			fmt.Fprintf(&b, "  • %s %s · %s\n",
+				mdv2Escape(date), mdv2Escape(clock), mdv2Escape(n.Body))
 		}
 	}
 	return b.String()
 }
 
-// numericNoteLine renders one row for a measurement-style note (weight, waist).
-// The value goes in bold; the date and any trailing comment are plain text.
+// numericNoteLine renders one row for a measurement-style note (weight, waist,
+// bodyfat). The value goes in bold; the date, label, unit and any trailing
+// comment are each escaped EXACTLY ONCE. We emit the bold "*" markers
+// ourselves rather than post-processing the assembled line, so a reserved char
+// (or a literal "*") in the free-text body can't double-escape or flip the
+// bold parity — either of which makes Telegram reject the whole message.
 func numericNoteLine(date, label string, value *float64, unit, body string) string {
 	val := "—"
 	if value != nil {
-		val = fmtFloat(*value, 2)
+		val = fmtFloat(*value, 2) // already MarkdownV2-escaped
 	}
-	line := fmt.Sprintf("  • %s · %s *%s %s*", date, label, val, unit)
+	line := fmt.Sprintf("  • %s · %s *%s %s*",
+		mdv2Escape(date), mdv2Escape(label), val, mdv2Escape(unit))
 	if body != "" {
 		line += " · " + mdv2Escape(body)
 	}
-	return mdv2EscapePrefix(line) + "\n"
-}
-
-// mdv2EscapePrefix escapes the parts of a pre-built line that we DIDN'T
-// already write as MarkdownV2 syntax (the * blocks). Kept tiny on purpose —
-// only used for the weight line where we mix bold and escaped text.
-func mdv2EscapePrefix(s string) string {
-	// Hack: split by "*", odd-indexed segments are bold content (already raw),
-	// even-indexed are surrounding text that needs escaping.
-	parts := strings.Split(s, "*")
-	for i := range parts {
-		if i%2 == 0 {
-			parts[i] = mdv2Escape(parts[i])
-		}
-	}
-	return strings.Join(parts, "*")
+	return line + "\n"
 }
 
 // SplitForTelegram breaks s into chunks no longer than telegramMessageLimit,

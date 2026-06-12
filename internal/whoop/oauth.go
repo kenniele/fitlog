@@ -9,7 +9,7 @@ import (
 // Whoop OAuth endpoints — the auth/token base differs from the API base.
 const (
 	AuthURL  = "https://api.prod.whoop.com/oauth/oauth2/auth"
-	TokenURL = "https://api.prod.whoop.com/oauth/oauth2/token"
+	TokenURL = "https://api.prod.whoop.com/oauth/oauth2/token" //nolint:gosec // G101 false positive: public OAuth token endpoint URL, not a credential.
 	APIBase  = "https://api.prod.whoop.com/developer"
 )
 

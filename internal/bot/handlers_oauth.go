@@ -1,14 +1,7 @@
 package bot
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"time"
-
 	tele "gopkg.in/telebot.v3"
-
-	"fitlog/internal/auth"
 )
 
 const startMessage = `*fitlog* — личный фитнес\-бот\.
@@ -42,19 +35,11 @@ func (b *Bot) handleStart(c tele.Context) error {
 }
 
 func (b *Bot) handleConnectWhoop(c tele.Context) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Already connected? Check by loading and seeing whether the token is
-	// fresh or refreshable.
-	if existing, err := b.deps.Tokens.Get(ctx, auth.SourceWhoop); err == nil {
-		if existing.RefreshToken != "" || time.Now().Before(existing.ExpiresAt) {
-			return b.reply(c, "Whoop уже подключён\\. Используй /status для проверки\\.")
-		}
-	} else if !errors.Is(err, auth.ErrNotFound) {
-		b.deps.Logger.Error("read whoop token", "err", err)
-	}
-
+	// We deliberately don't short-circuit when a token already exists. The
+	// OAuth callback persists via an upsert, so re-running the flow safely
+	// heals a revoked or expired token — whereas a "уже подключён" guard keyed
+	// on mere token presence would lock the user out of re-authenticating once
+	// the stored refresh token went bad. /status reports the current state.
 	state, err := b.deps.States.Issue(c.Chat().ID)
 	if err != nil {
 		b.deps.Logger.Error("issue oauth state", "err", err)
@@ -66,6 +51,6 @@ func (b *Bot) handleConnectWhoop(c tele.Context) error {
 	btn := markup.URL("Подключить Whoop", authURL)
 	markup.Inline(markup.Row(btn))
 
-	return c.Send(fmt.Sprintf("Жми кнопку, чтобы выдать доступ\\. State живёт 10 минут\\."),
+	return c.Send("Жми кнопку, чтобы выдать доступ\\. State живёт 10 минут\\.",
 		&tele.SendOptions{ParseMode: tele.ModeMarkdownV2}, markup)
 }

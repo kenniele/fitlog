@@ -70,10 +70,10 @@ func TestFormatInfo_FullPayload(t *testing.T) {
 	}
 	wos := []domain.Workout{
 		{SportID: 59, SportName: "Powerlifting",
-			Start:           day.Add(11 * time.Hour),
-			End:             day.Add(12*time.Hour + 14*time.Minute),
-			Strain:          12.6, MaxHR: 156, AvgHR: 110,
-			Kilojoule:       1500, PercentRecorded: 100,
+			Start:  day.Add(11 * time.Hour),
+			End:    day.Add(12*time.Hour + 14*time.Minute),
+			Strain: 12.6, MaxHR: 156, AvgHR: 110,
+			Kilojoule: 1500, PercentRecorded: 100,
 			ZoneDurations: domain.ZoneDurations{Zone1: 600_000, Zone2: 1_200_000}},
 	}
 
@@ -159,6 +159,54 @@ func TestFormatPeriodDigest_Deficit(t *testing.T) {
 
 func TestFormatPeriodDigest_Empty(t *testing.T) {
 	require.Empty(t, FormatPeriodDigest(map[int]float64{}, map[int]float64{}, 7))
+}
+
+// Only one side of the data present → no meaningful balance, so the digest is
+// suppressed instead of inventing a phantom deficit/surplus.
+func TestFormatPeriodDigest_OneSidedSuppressed(t *testing.T) {
+	require.Empty(t, FormatPeriodDigest(map[int]float64{}, map[int]float64{1: 2000, 2: 2100}, 7))
+	require.Empty(t, FormatPeriodDigest(map[int]float64{1: 1800}, map[int]float64{}, 7))
+	// Days that exist in only one map are ignored, not counted as 0.
+	require.Empty(t, FormatPeriodDigest(map[int]float64{1: 1800}, map[int]float64{2: 2000}, 7))
+}
+
+// When the two maps overlap on only some days, totals/averages/verdict are
+// computed over the overlapping days only and divided by that count — not by
+// the full requested window — and the header says so.
+func TestFormatPeriodDigest_PartialOverlap(t *testing.T) {
+	consumed := map[int]float64{1: 9999, 2: 1700, 3: 1900} // day 1 has no burn → excluded
+	burned := map[int]float64{2: 2200, 3: 2100, 4: 8888}   // day 4 has no food → excluded
+	out := FormatPeriodDigest(consumed, burned, 7)
+
+	require.Contains(t, out, "по 2 дня с данными")
+	require.Contains(t, out, "Съедено: *3600 kcal*")   // 1700+1900, day 1 excluded
+	require.Contains(t, out, "Потрачено: *4300 kcal*") // 2200+2100, day 4 excluded
+	require.Contains(t, out, "Баланс: *\\-700 kcal*")
+	require.Contains(t, out, "дефицит ✅")
+	require.Contains(t, out, "Дни: дефицит 2 · профицит 0 · около нормы 0")
+}
+
+// Regression: a numeric note with a free-text comment containing MarkdownV2
+// reserved chars (or a literal '*') must be escaped exactly once — never
+// double-escaped (which Telegram rejects).
+func TestFormatNotes_BodyEscaping(t *testing.T) {
+	loc := time.UTC
+	ts := time.Date(2026, 6, 12, 8, 0, 0, 0, loc)
+	w := 80.0
+	out := FormatNotes([]domain.Note{
+		{Ts: ts, Kind: domain.NoteKindWeight, Value: &w, Body: "после еды (-0.5)"},
+	}, loc)
+
+	require.Contains(t, out, "после еды \\(\\-0\\.5\\)") // single escape
+	require.NotContains(t, out, `\\(`)                   // no double-backslash
+	require.Contains(t, out, "*80 кг*")                  // bold value intact
+
+	// A literal '*' in the body must not break the bold parity.
+	out2 := FormatNotes([]domain.Note{
+		{Ts: ts, Kind: domain.NoteKindWeight, Value: &w, Body: "сет 3*8"},
+	}, loc)
+	require.Contains(t, out2, "*80 кг*")
+	require.Contains(t, out2, "сет 3\\*8")
 }
 
 func TestFormatPeriodDigest_Surplus(t *testing.T) {

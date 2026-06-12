@@ -18,11 +18,20 @@ func (b *Bot) handleFood(c tele.Context) error {
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 
 	if len(c.Args()) > 0 {
-		switch strings.ToLower(strings.TrimSpace(c.Args()[0])) {
+		arg := strings.TrimSpace(c.Args()[0])
+		switch strings.ToLower(arg) {
 		case "yesterday":
 			day = day.AddDate(0, 0, -1)
 		case "today":
 			// already today
+		default:
+			// Mirror /info: accept an explicit date instead of silently
+			// ignoring the argument and showing today.
+			parsed, err := time.ParseInLocation("2006-01-02", arg, loc)
+			if err != nil {
+				return b.reply(c, mdv2Escape("Не понял аргумент. Использование: /food [today|yesterday|ГГГГ-ММ-ДД]"))
+			}
+			day = parsed
 		}
 	}
 

@@ -1,43 +1,57 @@
+version: "2"
 run:
-  timeout: 5m
   tests: true
-
 linters:
-  disable-all: true
+  default: none
   enable:
-    - errcheck
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-    - gosimple
     - bodyclose
     - contextcheck
+    - errcheck
     - errorlint
     - gocritic
-    - revive
     - gosec
-
-linters-settings:
-  gosec:
-    excludes:
-      - G104 # duplicated by errcheck
-  revive:
+    - govet
+    - ineffassign
+    - revive
+    - staticcheck
+    - unused
+  settings:
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    gosec:
+      excludes:
+        - G104
+    revive:
+      rules:
+        - name: var-naming
+        - name: exported
+          disabled: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      - name: var-naming
-      - name: exported
-        disabled: true
-  errorlint:
-    errorf: true
-    asserts: true
-    comparison: true
-
+      - linters:
+          - bodyclose
+          - errcheck
+          - gosec
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gosec
-        - errcheck
-        - bodyclose
   max-issues-per-linter: 0
   max-same-issues: 0
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

@@ -137,7 +137,10 @@ func (h *CallbackHandler) HandleWhoopCallback(w http.ResponseWriter, r *http.Req
 	}
 
 	if cbErr != "" {
-		h.fail(w, r, chatID, "Whoop вернул ошибку: "+cbErr)
+		// Don't reflect the provider-supplied error verbatim into the user's
+		// chat / HTML page; log it and show a fixed message.
+		h.logger.Warn("whoop oauth callback returned error", "error", cbErr)
+		h.fail(w, r, chatID, "Whoop вернул ошибку авторизации")
 		return
 	}
 	if code == "" {

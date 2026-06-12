@@ -42,16 +42,17 @@ func (b *Bot) handleLog(c tele.Context) error {
 		if tail == "" {
 			return b.reply(c, mdv2Escape("Формат: /log "+kind+" <число>"))
 		}
-		// FatSecret-style "1,5" → "1.5".
-		tail = strings.ReplaceAll(tail, ",", ".")
-		v, err := strconv.ParseFloat(strings.Fields(tail)[0], 64)
+		// FatSecret-style "1,5" → "1.5", applied ONLY to the number token so a
+		// comma inside the trailing comment ("80 утром, натощак") survives.
+		first := strings.Fields(tail)[0]
+		v, err := strconv.ParseFloat(strings.ReplaceAll(first, ",", "."), 64)
 		if err != nil {
-			return b.reply(c, mdv2Escape("Не понял число: "+tail))
+			return b.reply(c, mdv2Escape("Не понял число: "+first))
 		}
 		note.Kind = kind
 		note.Value = &v
-		// Preserve any trailing comment, e.g. "/log weight 105.2 утром натощак".
-		if rest := strings.TrimSpace(strings.TrimPrefix(tail, strings.Fields(tail)[0])); rest != "" {
+		// Preserve any trailing comment verbatim, e.g. "/log weight 105.2 утром натощак".
+		if rest := strings.TrimSpace(strings.TrimPrefix(tail, first)); rest != "" {
 			note.Body = rest
 		}
 

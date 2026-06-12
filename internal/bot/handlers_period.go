@@ -74,24 +74,37 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 				b.deps.Logger.Warn("whoop workouts", "err", err)
 			}
 
-			if len(recs) > 0 {
-				var sum, hrv float64
-				for _, r := range recs {
-					sum += r.Score
-					hrv += r.HRVMilli
+			// Average only SCORED recoveries — unscored/pending ones come back
+			// with Score==0 && HRV==0 and would drag both averages toward zero.
+			var sum, hrv float64
+			nRec := 0
+			for _, r := range recs {
+				if r.Score == 0 && r.HRVMilli == 0 {
+					continue
 				}
-				avg := sum / float64(len(recs))
+				sum += r.Score
+				hrv += r.HRVMilli
+				nRec++
+			}
+			if nRec > 0 {
+				avg := sum / float64(nRec)
 				fmt.Fprintf(&body, "💪 Recovery avg %s%% %s • HRV avg %s ms\n",
-					fmtFloat(avg, 0), recoveryEmoji(avg), fmtFloat(hrv/float64(len(recs)), 0))
+					fmtFloat(avg, 0), recoveryEmoji(avg), fmtFloat(hrv/float64(nRec), 0))
 			}
 
-			if len(cycles) > 0 {
-				var total float64
-				for _, c := range cycles {
-					total += c.Strain
+			// Likewise skip unscored cycles (Strain==0) so they don't deflate avg.
+			var total float64
+			nStrain := 0
+			for _, c := range cycles {
+				if c.ScoreState != "SCORED" {
+					continue
 				}
+				total += c.Strain
+				nStrain++
+			}
+			if nStrain > 0 {
 				fmt.Fprintf(&body, "⚡ Total strain %s • avg %s\n",
-					fmtFloat(total, 1), fmtFloat(total/float64(len(cycles)), 1))
+					fmtFloat(total, 1), fmtFloat(total/float64(nStrain), 1))
 			}
 
 			if len(sleeps) > 0 {
@@ -126,33 +139,43 @@ func (b *Bot) makePeriodHandler(days int) tele.HandlerFunc {
 			}
 		}
 
-		// Macros — sum DailyNutrition from FatSecret over the period.
-		// Fetch via 'to' (yesterday) so we always hit the right month rollup.
-		if monthly, err := b.deps.FatSecret.FoodEntriesMonth(ctx, to.AddDate(0, 0, -1)); err != nil {
-			b.deps.Logger.Warn("fatsecret month", "err", err)
-		} else {
-			fromInt := fatsecret.ToDateInt(from)
-			toInt := fatsecret.ToDateInt(to) // exclusive — today not counted
-			var cal, prot, fat, carbs float64
-			n := 0
-			for _, d := range monthly {
-				if d.DateInt < fromInt || d.DateInt >= toInt {
-					continue
-				}
-				consumedByDay[d.DateInt] = d.Calories
-				cal += d.Calories
-				prot += d.Protein
-				fat += d.Fat
-				carbs += d.Carbs
-				n++
+		// Macros — sum DailyNutrition from FatSecret over the period. A single
+		// food_entries.get_month call returns only ONE calendar month, but a
+		// 7- or 30-day window routinely straddles a month boundary, so fetch
+		// every month the window touches and merge before filtering — otherwise
+		// the earlier month's days silently count as 0 in the digest.
+		monthly := map[int]domain.DailyNutrition{}
+		for _, m := range monthsSpanned(from, toLabel, loc) {
+			rows, err := b.deps.FatSecret.FoodEntriesMonth(ctx, m)
+			if err != nil {
+				b.deps.Logger.Warn("fatsecret month", "err", err, "month", m.Format("2006-01"))
+				continue
 			}
-			if n > 0 {
-				fmt.Fprintf(&body, "\n🥗 *Питание avg* %s / %sб / %sж / %sу\n",
-					fmtFloat(cal/float64(n), 0),
-					fmtFloat(prot/float64(n), 0),
-					fmtFloat(fat/float64(n), 0),
-					fmtFloat(carbs/float64(n), 0))
+			for _, d := range rows {
+				monthly[d.DateInt] = d
 			}
+		}
+		fromInt := fatsecret.ToDateInt(from)
+		toInt := fatsecret.ToDateInt(to) // exclusive — today not counted
+		var cal, prot, fat, carbs float64
+		n := 0
+		for _, d := range monthly {
+			if d.DateInt < fromInt || d.DateInt >= toInt {
+				continue
+			}
+			consumedByDay[d.DateInt] = d.Calories
+			cal += d.Calories
+			prot += d.Protein
+			fat += d.Fat
+			carbs += d.Carbs
+			n++
+		}
+		if n > 0 {
+			fmt.Fprintf(&body, "\n🥗 *Питание avg* %s / %sб / %sж / %sу\n",
+				fmtFloat(cal/float64(n), 0),
+				fmtFloat(prot/float64(n), 0),
+				fmtFloat(fat/float64(n), 0),
+				fmtFloat(carbs/float64(n), 0))
 		}
 
 		// Notes for the period — newest first.
@@ -181,6 +204,21 @@ func pluralDays(n int) string {
 		return "дня"
 	}
 	return "дней"
+}
+
+// monthsSpanned returns one anchor time (the 1st) in each calendar month the
+// inclusive window [from, toLabel] touches, so the caller can fetch every
+// FatSecret monthly rollup the period overlaps — a 7- or 30-day window can
+// straddle a month boundary.
+func monthsSpanned(from, toLabel time.Time, loc *time.Location) []time.Time {
+	var out []time.Time
+	m := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, loc)
+	last := time.Date(toLabel.Year(), toLabel.Month(), 1, 0, 0, 0, 0, loc)
+	for !m.After(last) {
+		out = append(out, m)
+		m = m.AddDate(0, 1, 0)
+	}
+	return out
 }
 
 // topWorkouts returns the n workouts with the highest strain.
@@ -218,8 +256,12 @@ func (b *Bot) handleSleep(c tele.Context) error {
 	defer cancel()
 
 	wc, err := b.loadWhoopClient(ctx)
-	if err != nil {
+	switch {
+	case errors.Is(err, errWhoopNotConnected):
 		return b.reply(c, "Whoop не подключён")
+	case err != nil:
+		b.deps.Logger.Error("load whoop client", "err", err)
+		return b.reply(c, "Whoop недоступен: "+mdv2Escape(err.Error()))
 	}
 	sleeps, err := wc.Sleeps(ctx, domain.Days(time.Now(), days), 25)
 	if err != nil {
@@ -248,26 +290,32 @@ func (b *Bot) handleRecovery(c tele.Context) error {
 	defer cancel()
 
 	wc, err := b.loadWhoopClient(ctx)
-	if err != nil {
+	switch {
+	case errors.Is(err, errWhoopNotConnected):
 		return b.reply(c, "Whoop не подключён")
+	case err != nil:
+		b.deps.Logger.Error("load whoop client", "err", err)
+		return b.reply(c, "Whoop недоступен: "+mdv2Escape(err.Error()))
 	}
 	recs, err := wc.Recoveries(ctx, domain.Days(time.Now(), days), 25)
 	if err != nil {
 		return b.reply(c, "Ошибка Whoop: "+mdv2Escape(err.Error()))
 	}
 
-	// HRV trend: compare today's HRV to the mean of the last 7 (excluding today).
+	// HRV trend: compare today's HRV to the mean of the preceding up-to-7 days.
+	// Whoop returns recoveries newest-first, so recs[0] is today and recs[1:]
+	// are the preceding days.
 	var trend string
 	if len(recs) >= 2 {
 		var sum float64
 		denom := 0
-		for i := 0; i < len(recs)-1 && denom < 7; i++ {
+		for i := 1; i < len(recs) && denom < 7; i++ {
 			sum += recs[i].HRVMilli
 			denom++
 		}
 		if denom > 0 {
 			baseline := sum / float64(denom)
-			last := recs[len(recs)-1].HRVMilli
+			last := recs[0].HRVMilli
 			switch {
 			case last > baseline*1.05:
 				trend = "↑"
@@ -302,8 +350,12 @@ func (b *Bot) handleWorkouts(c tele.Context) error {
 	defer cancel()
 
 	wc, err := b.loadWhoopClient(ctx)
-	if err != nil {
+	switch {
+	case errors.Is(err, errWhoopNotConnected):
 		return b.reply(c, "Whoop не подключён")
+	case err != nil:
+		b.deps.Logger.Error("load whoop client", "err", err)
+		return b.reply(c, "Whoop недоступен: "+mdv2Escape(err.Error()))
 	}
 	wos, err := wc.Workouts(ctx, domain.Days(time.Now(), days), 25)
 	if err != nil {
