@@ -2,6 +2,10 @@
 .env.local
 *.local
 
+# Caddyfile управляется на сервере вручную (общий для нескольких проектов),
+# в репо только deployments/Caddyfile.example как шаблон.
+deployments/Caddyfile
+
 # Binaries
 /fitlog
 /bin/

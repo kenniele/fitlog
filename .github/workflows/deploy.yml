@@ -75,11 +75,14 @@ jobs:
           ssh -i ~/.ssh/id_deploy -p "$PORT" "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd ~/fitlog
-          # git pull нужен только чтобы держать актуальными compose-файл и .env-схему.
-          git pull --ff-only
-          docker compose -f deployments/docker-compose.yml pull
-          docker compose -f deployments/docker-compose.yml up -d
-          docker compose -f deployments/docker-compose.yml logs --tail=20 app
+          # Жёстко синхронизируемся с origin/main, чтобы локальный дрейф трекаемых
+          # файлов не ломал деплой. .env в .gitignore — reset --hard его не трогает.
+          git fetch origin main
+          git reset --hard origin/main
+          COMPOSE="docker compose -f deployments/docker-compose.yml -f deployments/docker-compose.prod.yml"
+          $COMPOSE pull
+          $COMPOSE up -d
+          $COMPOSE logs --tail=20 app
           # Старый образ после обновления тега становится dangling — убираем.
           docker image prune -f || true
           REMOTE

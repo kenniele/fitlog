@@ -1,0 +1,18 @@
+# Шаблон Caddyfile для прод-сервера.
+#
+# Реальный файл — deployments/Caddyfile — НЕ коммитится (см. .gitignore) и
+# управляется на сервере вручную, как .env: на нём может жить роутинг сразу
+# нескольких проектов. git reset --hard в деплое его не трогает (untracked).
+#
+# Caddy и app поднимаются одним compose-проектом
+# (docker-compose.yml + docker-compose.prod.yml), поэтому до бота можно
+# ходить по имени сервиса `app` внутри compose-сети.
+
+fitlog.chickenkiller.com {
+    encode zstd gzip
+    reverse_proxy app:8080
+    log {
+        output stdout
+        format console
+    }
+}
