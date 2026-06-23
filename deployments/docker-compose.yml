@@ -21,6 +21,9 @@ services:
       retries: 10
 
   app:
+    # На сервере тянется готовый образ из GHCR (docker compose pull).
+    # build: остаётся для локальной сборки (make docker-up) и сборки в CI.
+    image: ghcr.io/kenniele/fitlog:latest
     build:
       context: ..
       dockerfile: deployments/Dockerfile
