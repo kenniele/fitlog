@@ -45,6 +45,11 @@ jobs:
           set -euo pipefail
           cd ~/fitlog
           git pull --ff-only
+          # Освобождаем место от прошлых сборок, иначе небольшой VPS-диск переполняется.
+          docker image prune -f || true
+          docker builder prune -f || true
           docker compose -f deployments/docker-compose.yml up -d --build
           docker compose -f deployments/docker-compose.yml logs --tail=20 app
+          # Образ предыдущей версии стал dangling после пересборки — убираем.
+          docker image prune -f || true
           REMOTE
