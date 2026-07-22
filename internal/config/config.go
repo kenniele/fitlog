@@ -20,10 +20,11 @@ type Config struct {
 	WhoopClientSecret string `env:"WHOOP_CLIENT_SECRET,required"`
 	WhoopRedirectURI  string `env:"WHOOP_REDIRECT_URI,required"`
 
-	FatSecretConsumerKey    string `env:"FATSECRET_CONSUMER_KEY,required"`
-	FatSecretConsumerSecret string `env:"FATSECRET_CONSUMER_SECRET,required"`
-	FatSecretAccessToken    string `env:"FATSECRET_ACCESS_TOKEN,required"`
-	FatSecretAccessSecret   string `env:"FATSECRET_ACCESS_SECRET,required"`
+	FatSecretConsumerKey    string  `env:"FATSECRET_CONSUMER_KEY,required"`
+	FatSecretConsumerSecret string  `env:"FATSECRET_CONSUMER_SECRET,required"`
+	FatSecretAccessToken    string  `env:"FATSECRET_ACCESS_TOKEN,required"`
+	FatSecretAccessSecret   string  `env:"FATSECRET_ACCESS_SECRET,required"`
+	NutritionEstimatedTDEE  float64 `env:"NUTRITION_ESTIMATED_TDEE"`
 
 	TelegramBotToken       string  `env:"TELEGRAM_BOT_TOKEN,required"`
 	TelegramAllowedUserIDs []int64 `env:"TELEGRAM_ALLOWED_USER_IDS,required" envSeparator:","`

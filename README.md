@@ -33,6 +33,7 @@ In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀*
 | `WHOOP_REDIRECT_URI`           | yes      | Must match the registered callback (`/oauth/whoop/callback`)         |
 | `FATSECRET_CONSUMER_KEY/SECRET`| yes      | OAuth 1.0 app credentials                                            |
 | `FATSECRET_ACCESS_TOKEN/SECRET`| yes      | OAuth 1.0 user access tokens (never expire)                          |
+| `NUTRITION_ESTIMATED_TDEE`     | no       | Maintenance kcal/day used by the 14-day deficit analysis             |
 | `TELEGRAM_BOT_TOKEN`           | yes      | From @BotFather                                                      |
 | `TELEGRAM_ALLOWED_USER_IDS`    | yes      | Comma-separated int64 Telegram user IDs                              |
 | `HTTP_ADDR`                    | no       | Default `:8080`. Serves Whoop OAuth callback + DB-aware `/healthz`.  |
@@ -49,6 +50,7 @@ In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀*
 | `Питание 🥑` | Yesterday's completed FatSecret meal groups and macros |
 | `Статья 📖` | A random Obsidian article as a styled HTML page |
 | `/health_summary` | Whoop and FatSecret summary for the previous 30 completed days |
+| `/nutrition_analysis` | Average intake, deficit, protein, and calculated weekly weight change for 14 completed days |
 | `/info YYYY-MM-DD` | Whoop and FatSecret report for a selected calendar day |
 
 The provider modules expose the same application pipeline: `Fetch → Transform → Format`. Telegram handlers only select a request and deliver the formatted result.

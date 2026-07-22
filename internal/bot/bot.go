@@ -92,6 +92,7 @@ func mainMenu() *tele.ReplyMarkup {
 func botCommands() []tele.Command {
 	return []tele.Command{
 		{Text: "health_summary", Description: "Саммари здоровья и питания за 30 дней"},
+		{Text: "nutrition_analysis", Description: "Анализ дефицита за последние 14 дней"},
 		{Text: "info", Description: "Здоровье и питание за выбранную дату"},
 	}
 }
@@ -101,10 +102,22 @@ func (b *Bot) registerHandlers() {
 	b.b.Handle(NutritionButton, b.handleNutrition)
 	b.b.Handle(ArticleButton, b.handleArticle)
 	b.b.Handle("/health_summary", b.handleHealthSummary)
+	b.b.Handle("/nutrition_analysis", b.handleNutritionAnalysis)
 	b.b.Handle("/info", b.handleInfo)
 	// Unknown text, including Telegram's conventional /start, only opens the
 	// three-button menu and does not create another bot command.
 	b.b.Handle(tele.OnText, b.handleMenu)
+}
+
+func (b *Bot) handleNutritionAnalysis(c tele.Context) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	report, err := b.deps.FatSecret.Execute(ctx, fatsecret.NutritionAnalysis(time.Now(), b.deps.Location))
+	if err != nil {
+		b.deps.Logger.Warn("nutrition deficit analysis", "err", err)
+		return b.reply(c, "Не удалось рассчитать дефицит: "+reportfmt.Escape(err.Error()))
+	}
+	return b.reply(c, report)
 }
 
 func (b *Bot) Start(ctx context.Context) {

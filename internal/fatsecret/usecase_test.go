@@ -61,3 +61,23 @@ func TestUseCaseSummaryUsesOnlyRequestedDays(t *testing.T) {
 	require.Equal(t, 2, report.LoggedDays)
 	require.InDelta(t, 1900, report.Calories, 0.01)
 }
+
+func TestNutritionAnalysisCalculatesDeficitAndWeeklyWeightChange(t *testing.T) {
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	request := NutritionAnalysis(now, time.UTC)
+	source := reportSource{days: []domain.DailyNutrition{
+		{DateInt: ToDateInt(request.From), Calories: 1800, Protein: 140, Fat: 60, Carbs: 180},
+		{DateInt: ToDateInt(request.From.AddDate(0, 0, 1)), Calories: 2000, Protein: 150, Fat: 70, Carbs: 200},
+	}}
+	u := NewUseCase(source, time.UTC, ReportOptions{EstimatedTDEE: 2620})
+
+	report := u.Transform(FetchedReport{Request: request, Days: source.days})
+	require.NotNil(t, report.Analysis)
+	require.InDelta(t, 720, report.Analysis.Deficit, 0.01)
+	require.InDelta(t, 145, report.Analysis.Protein, 0.01)
+
+	output := u.Format(report)
+	require.Contains(t, output, "средний дефицит — *720 ккал*")
+	require.Contains(t, output, "*0\\.65 кг/неделю*")
+	require.Contains(t, output, "*145 г*")
+}

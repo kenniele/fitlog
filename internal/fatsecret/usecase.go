@@ -16,7 +16,10 @@ type ReportMode uint8
 const (
 	DailyReport ReportMode = iota + 1
 	SummaryReport
+	AnalysisReport
 )
+
+const caloriesPerKilogram = 7700.0
 
 type ReportRequest struct {
 	Mode ReportMode
@@ -40,6 +43,12 @@ func LastCompletedDays(now time.Time, loc *time.Location, days int) ReportReques
 	now = now.In(loc)
 	to := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	return ReportRequest{Mode: SummaryReport, From: to.AddDate(0, 0, -days), To: to}
+}
+
+func NutritionAnalysis(now time.Time, loc *time.Location) ReportRequest {
+	req := LastCompletedDays(now, loc, 14)
+	req.Mode = AnalysisReport
+	return req
 }
 
 type FetchedReport struct {
@@ -66,6 +75,7 @@ type Report struct {
 	Protein    float64
 	Fat        float64
 	Carbs      float64
+	Analysis   *domain.NutritionAnalysis
 }
 
 type Source interface {
@@ -83,12 +93,21 @@ type ReportUseCase interface {
 }
 
 type UseCase struct {
-	source Source
-	loc    *time.Location
+	source        Source
+	loc           *time.Location
+	estimatedTDEE float64
 }
 
-func NewUseCase(source Source, loc *time.Location) *UseCase {
-	return &UseCase{source: source, loc: loc}
+type ReportOptions struct {
+	EstimatedTDEE float64
+}
+
+func NewUseCase(source Source, loc *time.Location, options ...ReportOptions) *UseCase {
+	u := &UseCase{source: source, loc: loc}
+	if len(options) > 0 {
+		u.estimatedTDEE = options[0].EstimatedTDEE
+	}
+	return u
 }
 
 func (u *UseCase) Fetch(ctx context.Context, req ReportRequest) (FetchedReport, error) {
@@ -165,15 +184,51 @@ func (u *UseCase) Transform(in FetchedReport) Report {
 		out.Protein /= count
 		out.Fat /= count
 		out.Carbs /= count
+		if in.Request.Mode == AnalysisReport && u.estimatedTDEE > 0 {
+			out.Analysis = &domain.NutritionAnalysis{
+				Calories: out.Calories, Protein: out.Protein, Fat: out.Fat, Carbs: out.Carbs,
+				EstimatedTDEE: u.estimatedTDEE,
+				Deficit:       u.estimatedTDEE - out.Calories,
+			}
+		}
 	}
 	return out
 }
 
 func (u *UseCase) Format(report Report) string {
+	if report.Request.Mode == AnalysisReport {
+		return u.formatAnalysis(report)
+	}
 	if report.Request.Mode == SummaryReport {
 		return u.formatSummary(report)
 	}
 	return u.formatDaily(report)
+}
+
+func (u *UseCase) formatAnalysis(r Report) string {
+	var b strings.Builder
+	b.WriteString("📉 *Анализ дефицита за 14 дней*\n")
+	if r.LoggedDays == 0 {
+		b.WriteString("Записей о питании за период нет\\.")
+		return b.String()
+	}
+	if r.Analysis == nil {
+		fmt.Fprintf(&b, "Среднее питание: %s ккал · Б %s · Ж %s · У %s\n\n",
+			reportfmt.Number(r.Calories, 0), reportfmt.Number(r.Protein, 0),
+			reportfmt.Number(r.Fat, 0), reportfmt.Number(r.Carbs, 0))
+		b.WriteString("Для расчёта дефицита задай `NUTRITION_ESTIMATED_TDEE`\\.")
+		return b.String()
+	}
+	a := r.Analysis
+	weeklyChange := a.Deficit * 7 / caloriesPerKilogram
+	fmt.Fprintf(&b, "За последние 14 дней средний дефицит — *%s ккал*\\.\n", reportfmt.Number(a.Deficit, 0))
+	fmt.Fprintf(&b, "Расчётная потеря веса — *%s кг/неделю*\\.\n", reportfmt.Number(weeklyChange, 2))
+	fmt.Fprintf(&b, "Белок держался в среднем на *%s г*\\.\n\n", reportfmt.Number(a.Protein, 0))
+	fmt.Fprintf(&b, "Среднее: %s ккал · Б %s · Ж %s · У %s\n", reportfmt.Number(a.Calories, 0),
+		reportfmt.Number(a.Protein, 0), reportfmt.Number(a.Fat, 0), reportfmt.Number(a.Carbs, 0))
+	fmt.Fprintf(&b, "Оценочный TDEE: %s ккал\n", reportfmt.Number(a.EstimatedTDEE, 0))
+	fmt.Fprintf(&b, "Учтено %d из 14 %s", r.LoggedDays, reportfmt.PluralDays(r.LoggedDays))
+	return b.String()
 }
 
 func (u *UseCase) Execute(ctx context.Context, req ReportRequest) (string, error) {

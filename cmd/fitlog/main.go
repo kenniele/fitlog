@@ -95,7 +95,7 @@ func run(parent context.Context) error {
 			cfg.FatSecretAccessToken, cfg.FatSecretAccessSecret),
 		fatsecret.Options{},
 	)
-	fsReports := fatsecret.NewUseCase(fsClient, loc)
+	fsReports := fatsecret.NewUseCase(fsClient, loc, fatsecret.ReportOptions{EstimatedTDEE: cfg.NutritionEstimatedTDEE})
 	articleReports := obsidian.NewUseCase(cfg.ObsidianArticlesPath, articleCipher)
 
 	// OAuth state store
