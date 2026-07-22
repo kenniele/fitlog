@@ -38,6 +38,14 @@ func TestUseCaseDailyPipeline(t *testing.T) {
 	require.Contains(t, output, "Омлет")
 }
 
+func TestYesterdayRequestUsesPreviousCalendarDay(t *testing.T) {
+	loc := time.FixedZone("UTC+3", 3*60*60)
+	now := time.Date(2026, 7, 22, 0, 30, 0, 0, loc)
+	request := Yesterday(now, loc)
+	require.Equal(t, "2026-07-21", request.From.Format("2006-01-02"))
+	require.Equal(t, "2026-07-22", request.To.Format("2006-01-02"))
+}
+
 func TestUseCaseSummaryUsesOnlyRequestedDays(t *testing.T) {
 	from := time.Date(2026, 6, 22, 0, 0, 0, 0, time.UTC)
 	source := reportSource{days: []domain.DailyNutrition{

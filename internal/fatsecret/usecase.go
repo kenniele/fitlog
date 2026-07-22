@@ -32,6 +32,10 @@ func Day(day time.Time, loc *time.Location) ReportRequest {
 
 func Today(now time.Time, loc *time.Location) ReportRequest { return Day(now, loc) }
 
+func Yesterday(now time.Time, loc *time.Location) ReportRequest {
+	return Day(now.In(loc).AddDate(0, 0, -1), loc)
+}
+
 func LastCompletedDays(now time.Time, loc *time.Location, days int) ReportRequest {
 	now = now.In(loc)
 	to := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)

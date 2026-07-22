@@ -44,7 +44,7 @@ In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀*
 | Action | Result |
 | ------ | ------ |
 | `Здоровье🫀` | Yesterday's completed Whoop sleep, recovery, strain, and workouts |
-| `Питание 🥑` | Today's FatSecret meal groups and macros |
+| `Питание 🥑` | Yesterday's completed FatSecret meal groups and macros |
 | `/health_summary` | Whoop and FatSecret summary for the previous 30 completed days |
 | `/info YYYY-MM-DD` | Whoop and FatSecret report for a selected calendar day |
 

@@ -183,7 +183,7 @@ func (b *Bot) handleNutrition(c tele.Context) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	report, err := b.deps.FatSecret.Execute(ctx, fatsecret.Today(time.Now(), b.deps.Location))
+	report, err := b.deps.FatSecret.Execute(ctx, fatsecret.Yesterday(time.Now(), b.deps.Location))
 	if err != nil {
 		b.deps.Logger.Warn("fatsecret daily report", "err", err)
 		return b.reply(c, "Не удалось получить данные FatSecret: "+reportfmt.Escape(err.Error()))
