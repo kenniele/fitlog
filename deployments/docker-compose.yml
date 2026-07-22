@@ -36,6 +36,12 @@ services:
     environment:
       DATABASE_URL: postgres://fitlog:fitlog@postgres:5432/fitlog?sslmode=disable
       HTTP_ADDR: :8080
+      # The host path comes from .env; inside the container it is always /vault.
+      OBSIDIAN_ARTICLES_PATH: /vault
+    volumes:
+      # Absolute OBSIDIAN_ARTICLES_PATH is recommended. The fallback expects
+      # an obsidian/articles directory next to the fitlog repository.
+      - ${OBSIDIAN_ARTICLES_PATH:-../../obsidian/articles}:/vault:ro
     # Порт наружу не публикуется: до app ходит Caddy по compose-сети
     # (reverse_proxy app:8080). На хосте :8080 может быть занят другим сервисом.
     # Для прямого локального доступа к HTTP используй `make run`.

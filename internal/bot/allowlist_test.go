@@ -18,10 +18,12 @@ func TestAllowlist(t *testing.T) {
 func TestBotSurfaceHasTwoButtonsAndOneCommand(t *testing.T) {
 	menu := mainMenu()
 	require.True(t, menu.IsPersistent)
-	require.Len(t, menu.ReplyKeyboard, 1)
+	require.Len(t, menu.ReplyKeyboard, 2)
 	require.Len(t, menu.ReplyKeyboard[0], 2)
 	require.Equal(t, HealthButton, menu.ReplyKeyboard[0][0].Text)
 	require.Equal(t, NutritionButton, menu.ReplyKeyboard[0][1].Text)
+	require.Len(t, menu.ReplyKeyboard[1], 1)
+	require.Equal(t, ArticleButton, menu.ReplyKeyboard[1][0].Text)
 
 	commands := botCommands()
 	require.Len(t, commands, 2)

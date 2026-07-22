@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/caarlos0/env/v11"
@@ -29,6 +31,27 @@ type Config struct {
 	LogLevel   string `env:"LOG_LEVEL" envDefault:"info"`
 	HTTPAddr   string `env:"HTTP_ADDR" envDefault:":8080"`
 	TZLocation string `env:"TZ_LOCATION" envDefault:"Europe/Moscow"`
+
+	ObsidianArticlesPath string `env:"OBSIDIAN_ARTICLES_PATH"`
+	PublicBaseURL        string `env:"PUBLIC_BASE_URL"`
+}
+
+// BaseURL returns the public origin used in links sent to Telegram. When an
+// explicit value is absent, the already-required Whoop redirect URI provides
+// the same externally reachable scheme and host.
+func (c *Config) BaseURL() (string, error) {
+	raw := strings.TrimSpace(c.PublicBaseURL)
+	if raw == "" {
+		raw = c.WhoopRedirectURI
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("invalid public base URL %q", raw)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("public base URL must use http or https")
+	}
+	return parsed.Scheme + "://" + parsed.Host, nil
 }
 
 // Location returns the parsed time.Location for the configured zone.

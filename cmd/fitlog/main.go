@@ -18,6 +18,7 @@ import (
 	"fitlog/internal/config"
 	"fitlog/internal/fatsecret"
 	"fitlog/internal/observability"
+	"fitlog/internal/obsidian"
 	"fitlog/internal/server"
 	"fitlog/internal/storage"
 	"fitlog/internal/whoop"
@@ -26,7 +27,7 @@ import (
 func main() {
 	root := &cobra.Command{
 		Use:   "fitlog",
-		Short: "Personal fitness bot pulling Whoop + FatSecret on demand",
+		Short: "Personal Telegram assistant for health, nutrition, and reading",
 	}
 	root.AddCommand(serverCmd())
 
@@ -59,6 +60,10 @@ func run(parent context.Context) error {
 	if err != nil {
 		return err
 	}
+	publicBaseURL, err := cfg.BaseURL()
+	if err != nil {
+		return err
+	}
 
 	ctx, cancel := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -75,6 +80,10 @@ func run(parent context.Context) error {
 	if err != nil {
 		return fmt.Errorf("cipher: %w", err)
 	}
+	articleCipher, err := auth.NewDerivedCipherFromBase64(cfg.TokenEncryptionKey, "obsidian-article-links")
+	if err != nil {
+		return fmt.Errorf("article cipher: %w", err)
+	}
 	tokenStore := auth.NewTokenStore(storage.NewTokensRepo(pool), cipher)
 
 	// Whoop OAuth config
@@ -87,6 +96,7 @@ func run(parent context.Context) error {
 		fatsecret.Options{},
 	)
 	fsReports := fatsecret.NewUseCase(fsClient, loc)
+	articleReports := obsidian.NewUseCase(cfg.ObsidianArticlesPath, articleCipher)
 
 	// OAuth state store
 	states := server.NewStateStore()
@@ -96,12 +106,14 @@ func run(parent context.Context) error {
 	whoopProvider := whoop.NewOAuthProvider(tokenStore, oauthCfg, logger)
 	whoopReports := whoop.NewUseCase(whoopProvider, loc)
 	deps := bot.Deps{
-		Whoop:       whoopReports,
-		FatSecret:   fsReports,
-		OAuthConfig: oauthCfg,
-		States:      states,
-		Location:    loc,
-		Logger:      logger,
+		Whoop:         whoopReports,
+		FatSecret:     fsReports,
+		Articles:      articleReports,
+		PublicBaseURL: publicBaseURL,
+		OAuthConfig:   oauthCfg,
+		States:        states,
+		Location:      loc,
+		Logger:        logger,
 	}
 	tb, err := bot.New(cfg.TelegramBotToken, allowlist, deps) //nolint:contextcheck // telebot HandlerFunc has no inheritable context.Context; handlers create their own.
 	if err != nil {
@@ -110,9 +122,10 @@ func run(parent context.Context) error {
 
 	// HTTP server (OAuth callback + healthz). Bot doubles as Notifier.
 	cb := server.NewCallbackHandler(oauthCfg, states, tokenStore, tb, logger)
+	articleHandler := obsidian.NewHandler(articleReports, logger)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           server.Router(cb, pool),
+		Handler:           server.Router(cb, pool, articleHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

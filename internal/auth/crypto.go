@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -24,6 +25,26 @@ func NewCipherFromBase64(b64 string) (*Cipher, error) {
 		return nil, fmt.Errorf("decode base64 key: %w", err)
 	}
 	return NewCipher(raw)
+}
+
+// NewDerivedCipherFromBase64 derives an independent AES-256 key for a named
+// purpose from the configured master key. This lets subsystems reuse the one
+// required secret without encrypting different data domains with the same key.
+func NewDerivedCipherFromBase64(b64, purpose string) (*Cipher, error) {
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return nil, fmt.Errorf("decode base64 key: %w", err)
+	}
+	if len(raw) != 32 {
+		return nil, fmt.Errorf("encryption key must be 32 bytes, got %d", len(raw))
+	}
+	material := make([]byte, 0, len(purpose)+len(raw)+8)
+	material = append(material, "fitlog:"...)
+	material = append(material, purpose...)
+	material = append(material, 0)
+	material = append(material, raw...)
+	derived := sha256.Sum256(material)
+	return NewCipher(derived[:])
 }
 
 // NewCipher constructs a Cipher from a raw 32-byte key.

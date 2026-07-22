@@ -96,6 +96,33 @@ func TestNewCipherFromBase64_BadInput(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestNewDerivedCipherFromBase64(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString(newTestKey(t))
+	articles, err := NewDerivedCipherFromBase64(b64, "obsidian-article-links")
+	require.NoError(t, err)
+	otherPurpose, err := NewDerivedCipherFromBase64(b64, "other-purpose")
+	require.NoError(t, err)
+
+	first, err := articles.SealString("folder/article.md")
+	require.NoError(t, err)
+	second, err := articles.SealString("folder/article.md")
+	require.NoError(t, err)
+	require.NotEqual(t, first, second)
+
+	plain, err := articles.OpenString(first)
+	require.NoError(t, err)
+	require.Equal(t, "folder/article.md", plain)
+	_, err = otherPurpose.OpenString(first)
+	require.Error(t, err, "a token derived for one purpose must not open in another domain")
+}
+
+func TestNewDerivedCipherFromBase64_BadInput(t *testing.T) {
+	_, err := NewDerivedCipherFromBase64("not-base64", "purpose")
+	require.Error(t, err)
+	_, err = NewDerivedCipherFromBase64(base64.StdEncoding.EncodeToString(make([]byte, 16)), "purpose")
+	require.Error(t, err)
+}
+
 func TestCipher_Open_ShorterThanNonce(t *testing.T) {
 	c, err := NewCipher(newTestKey(t))
 	require.NoError(t, err)

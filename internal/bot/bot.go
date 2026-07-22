@@ -12,6 +12,7 @@ import (
 	tele "gopkg.in/telebot.v3"
 
 	"fitlog/internal/fatsecret"
+	"fitlog/internal/obsidian"
 	"fitlog/internal/reportfmt"
 	"fitlog/internal/whoop"
 )
@@ -19,6 +20,7 @@ import (
 const (
 	HealthButton    = "Здоровье🫀"
 	NutritionButton = "Питание 🥑"
+	ArticleButton   = "Статья 📖"
 )
 
 // StateIssuer is the small OAuth-state capability required by the delivery
@@ -28,16 +30,18 @@ type StateIssuer interface {
 }
 
 type Deps struct {
-	Whoop       whoop.ReportUseCase
-	FatSecret   fatsecret.ReportUseCase
-	OAuthConfig *oauth2.Config
-	States      StateIssuer
-	Location    *time.Location
-	Logger      *slog.Logger
+	Whoop         whoop.ReportUseCase
+	FatSecret     fatsecret.ReportUseCase
+	Articles      obsidian.ReportUseCase
+	PublicBaseURL string
+	OAuthConfig   *oauth2.Config
+	States        StateIssuer
+	Location      *time.Location
+	Logger        *slog.Logger
 }
 
-// Bot is deliberately a thin delivery adapter. Provider calls, aggregation
-// and formatting live in the Whoop and FatSecret use cases.
+// Bot is deliberately a thin delivery adapter. Fetching, transformation, and
+// formatting live in the provider-specific use cases.
 type Bot struct {
 	b    *tele.Bot
 	deps Deps
@@ -78,7 +82,10 @@ func New(token string, allowlist *Allowlist, deps Deps) (*Bot, error) {
 
 func mainMenu() *tele.ReplyMarkup {
 	menu := &tele.ReplyMarkup{ResizeKeyboard: true, IsPersistent: true, Placeholder: "Выбери раздел"}
-	menu.Reply(menu.Row(menu.Text(HealthButton), menu.Text(NutritionButton)))
+	menu.Reply(
+		menu.Row(menu.Text(HealthButton), menu.Text(NutritionButton)),
+		menu.Row(menu.Text(ArticleButton)),
+	)
 	return menu
 }
 
@@ -92,10 +99,11 @@ func botCommands() []tele.Command {
 func (b *Bot) registerHandlers() {
 	b.b.Handle(HealthButton, b.handleHealth)
 	b.b.Handle(NutritionButton, b.handleNutrition)
+	b.b.Handle(ArticleButton, b.handleArticle)
 	b.b.Handle("/health_summary", b.handleHealthSummary)
 	b.b.Handle("/info", b.handleInfo)
 	// Unknown text, including Telegram's conventional /start, only opens the
-	// two-button menu and does not create another bot command.
+	// three-button menu and does not create another bot command.
 	b.b.Handle(tele.OnText, b.handleMenu)
 }
 
@@ -126,6 +134,26 @@ func (b *Bot) NotifyOAuthFailure(_ context.Context, chatID int64, reason string)
 
 func (b *Bot) handleMenu(c tele.Context) error {
 	return c.Send("Выбери раздел:", b.menu)
+}
+
+func (b *Bot) handleArticle(c tele.Context) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	article, err := b.deps.Articles.Execute(ctx, obsidian.RandomRequest())
+	if err != nil {
+		b.deps.Logger.Warn("random obsidian article", "err", err)
+		switch {
+		case errors.Is(err, obsidian.ErrNotConfigured):
+			return b.reply(c, "Папка статей Obsidian ещё не настроена\\.")
+		case errors.Is(err, obsidian.ErrNoArticles):
+			return b.reply(c, "В папке Obsidian нет Markdown\\-статей\\.")
+		default:
+			return b.reply(c, "Не удалось выбрать статью: "+reportfmt.Escape(err.Error()))
+		}
+	}
+	link := b.deps.PublicBaseURL + "/articles/" + article.ID
+	return c.Send("📖 "+article.Title+"\n"+link, b.menu)
 }
 
 func (b *Bot) handleHealth(c tele.Context) error {

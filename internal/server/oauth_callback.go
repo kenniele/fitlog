@@ -103,8 +103,8 @@ func NewCallbackHandler(cfg *oauth2.Config, states *StateStore, tokens *auth.Tok
 	return &CallbackHandler{cfg: cfg, states: states, tokens: tokens, notifier: notifier, logger: logger}
 }
 
-// Router builds an http.Handler exposing /healthz and /oauth/whoop/callback.
-func Router(h *CallbackHandler, database HealthChecker) http.Handler {
+// Router builds an http.Handler exposing health, OAuth, and public article pages.
+func Router(h *CallbackHandler, database HealthChecker, articles http.Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/healthz", func(w http.ResponseWriter, request *http.Request) {
 		ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
@@ -120,6 +120,9 @@ func Router(h *CallbackHandler, database HealthChecker) http.Handler {
 	// short /callback or the namespaced /oauth/whoop/callback.
 	r.Get("/oauth/whoop/callback", h.HandleWhoopCallback)
 	r.Get("/callback", h.HandleWhoopCallback)
+	if articles != nil {
+		r.Mount("/articles", http.StripPrefix("/articles", articles))
+	}
 	return r
 }
 

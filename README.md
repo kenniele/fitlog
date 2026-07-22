@@ -1,12 +1,12 @@
 # fitlog
 
-Personal Telegram bot that pulls fitness data from **Whoop** and nutrition data from **FatSecret** on demand. The normal UI is a persistent two-button keyboard; slash commands provide a dated report and a 30-day summary. Access is restricted by Telegram ID. There are no schedulers or background API polls.
+Personal Telegram assistant that pulls fitness data from **Whoop**, nutrition data from **FatSecret**, and publishes a random Markdown article from an **Obsidian** folder. The normal UI is a persistent three-button keyboard; slash commands provide a dated health report and a 30-day summary. Access to the bot is restricted by Telegram ID. There are no schedulers or background API polls.
 
 ## Stack
 
 - Go 1.25.7+
 - PostgreSQL 16 (`pgx/v5`, `goose` for migrations)
-- `chi/v5` (only for the Whoop OAuth callback)
+- `chi/v5` for the Whoop OAuth callback, healthcheck, and article pages
 - `telebot.v3` (long-polling)
 - `golang.org/x/oauth2` for Whoop; handwritten HMAC-SHA1 signing for FatSecret
 - `slog`, `caarlos0/env/v11`, `joho/godotenv`
@@ -38,6 +38,8 @@ In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀*
 | `HTTP_ADDR`                    | no       | Default `:8080`. Serves Whoop OAuth callback + DB-aware `/healthz`.  |
 | `TZ_LOCATION`                  | no       | Default `Europe/Moscow`. Used for "today"/"yesterday" boundaries.    |
 | `LOG_LEVEL`                    | no       | `debug` / `info` / `warn` / `error`. Default `info`.                 |
+| `OBSIDIAN_ARTICLES_PATH`       | no       | Folder containing publishable `.md` files; read recursively          |
+| `PUBLIC_BASE_URL`              | no       | Public origin for article links; falls back to Whoop redirect origin |
 
 ## Telegram UI
 
@@ -45,10 +47,26 @@ In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀*
 | ------ | ------ |
 | `Здоровье🫀` | Yesterday's completed Whoop sleep, recovery, strain, and workouts |
 | `Питание 🥑` | Yesterday's completed FatSecret meal groups and macros |
+| `Статья 📖` | A random Obsidian article as a styled HTML page |
 | `/health_summary` | Whoop and FatSecret summary for the previous 30 completed days |
 | `/info YYYY-MM-DD` | Whoop and FatSecret report for a selected calendar day |
 
-The two provider modules expose the same application pipeline: `Fetch → Transform → Format`. Telegram handlers only select a request and deliver the formatted result.
+The provider modules expose the same application pipeline: `Fetch → Transform → Format`. Telegram handlers only select a request and deliver the formatted result.
+
+## Obsidian articles
+
+Point `OBSIDIAN_ARTICLES_PATH` directly at the folder whose Markdown notes may be public. Nested folders are supported; hidden directories, symlinks, and non-Markdown files are ignored. YAML frontmatter is removed, `title` and the first H1 are recognised, and common Markdown/Obsidian constructs receive lightweight HTML formatting.
+
+An `obsidian-git` vault can live next to fitlog and sync independently. For example:
+
+```env
+OBSIDIAN_ARTICLES_PATH=/home/fitlog-user/my-vault/Public
+PUBLIC_BASE_URL=https://fitlog.example.com
+```
+
+Docker Compose mounts this host path at `/vault` read-only. The Caddy route already forwarding the fitlog origin to `app:8080` also serves `/articles/...`; no Telegraph account or additional service is required.
+
+Article URLs contain an opaque AES-GCM token with a fresh random nonce, rather than a filename or an encoded vault path. There is no separate setting for this: fitlog derives an isolated article-link key from `FITLOG_TOKEN_ENCRYPTION_KEY`. Tokens cannot be enumerated or modified in practice, while anyone who receives a complete URL can still open it. Rotating `FITLOG_TOKEN_ENCRYPTION_KEY` invalidates previously issued article links.
 
 ## Troubleshooting
 
@@ -65,11 +83,12 @@ cmd/fitlog/             entrypoint
 internal/domain/        plain DTOs (Sleep, Recovery, Cycle, Workout, MealEntry, ...)
 internal/whoop/         OAuth2 + REST client + Fetch/Transform/Format reports
 internal/fatsecret/     OAuth1 signer + REST client + Fetch/Transform/Format reports
+internal/obsidian/      read-only vault scanner + Markdown-to-HTML article publisher
 internal/auth/          AES-GCM crypto + token store
 internal/storage/       pgx pool + repositories
 internal/reportfmt/     shared MarkdownV2 presentation helpers
-internal/bot/           thin Telegram delivery adapter and two-button menu
-internal/server/        Whoop OAuth callback HTTP server
+internal/bot/           thin Telegram delivery adapter and three-button menu
+internal/server/        HTTP router for OAuth, healthcheck, and articles
 internal/config/        env loading
 internal/observability/ slog setup
 migrations/             goose SQL migrations
