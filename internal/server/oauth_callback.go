@@ -82,6 +82,12 @@ type Notifier interface {
 	NotifyOAuthFailure(ctx context.Context, chatID int64, reason string)
 }
 
+// HealthChecker verifies the application's required persistence dependency.
+// pgxpool.Pool satisfies this interface.
+type HealthChecker interface {
+	Ping(context.Context) error
+}
+
 // CallbackHandler wires Whoop's OAuth2 callback into our token store.
 type CallbackHandler struct {
 	cfg      *oauth2.Config
@@ -98,9 +104,15 @@ func NewCallbackHandler(cfg *oauth2.Config, states *StateStore, tokens *auth.Tok
 }
 
 // Router builds an http.Handler exposing /healthz and /oauth/whoop/callback.
-func Router(h *CallbackHandler) http.Handler {
+func Router(h *CallbackHandler, database HealthChecker) http.Handler {
 	r := chi.NewRouter()
-	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+	r.Get("/healthz", func(w http.ResponseWriter, request *http.Request) {
+		ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
+		defer cancel()
+		if database == nil || database.Ping(ctx) != nil {
+			http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})

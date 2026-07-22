@@ -6,7 +6,7 @@ WORKDIR /src
 RUN apk add --no-cache git ca-certificates tzdata
 
 COPY go.mod go.sum* ./
-RUN go mod download || true
+RUN go mod download
 
 COPY . .
 

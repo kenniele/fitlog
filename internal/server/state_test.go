@@ -1,11 +1,31 @@
 package server
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+type healthChecker struct{ err error }
+
+func (h healthChecker) Ping(context.Context) error { return h.err }
+
+func TestHealthzChecksDatabase(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+
+	ok := httptest.NewRecorder()
+	Router(nil, healthChecker{}).ServeHTTP(ok, request)
+	require.Equal(t, http.StatusOK, ok.Code)
+
+	unavailable := httptest.NewRecorder()
+	Router(nil, healthChecker{err: errors.New("down")}).ServeHTTP(unavailable, request)
+	require.Equal(t, http.StatusServiceUnavailable, unavailable.Code)
+}
 
 func TestStateStore_IssueConsume(t *testing.T) {
 	s := NewStateStore()

@@ -33,9 +33,9 @@ type Repository interface {
 	Delete(ctx context.Context, src Source) error
 }
 
-// TokenStore is the encrypting facade over a Repository. All callers
-// (Whoop OAuth, /status, /connect_whoop) go through this — never the
-// raw repo — so plaintext never reaches the DB layer.
+// TokenStore is the encrypting facade over a Repository. Whoop OAuth and the
+// authenticated client provider always go through this layer, so plaintext
+// never reaches the DB repository.
 type TokenStore struct {
 	repo   Repository
 	cipher *Cipher

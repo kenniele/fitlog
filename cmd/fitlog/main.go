@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/oauth2"
 
 	"fitlog/internal/auth"
 	"fitlog/internal/bot"
@@ -77,7 +76,6 @@ func run(parent context.Context) error {
 		return fmt.Errorf("cipher: %w", err)
 	}
 	tokenStore := auth.NewTokenStore(storage.NewTokensRepo(pool), cipher)
-	notesRepo := storage.NewNotesRepo(pool)
 
 	// Whoop OAuth config
 	oauthCfg := whoop.NewOAuthConfig(cfg.WhoopClientID, cfg.WhoopClientSecret, cfg.WhoopRedirectURI, nil)
@@ -88,23 +86,22 @@ func run(parent context.Context) error {
 			cfg.FatSecretAccessToken, cfg.FatSecretAccessSecret),
 		fatsecret.Options{},
 	)
+	fsReports := fatsecret.NewUseCase(fsClient, loc)
 
 	// OAuth state store
 	states := server.NewStateStore()
 
 	// Bot
 	allowlist := bot.NewAllowlist(cfg.TelegramAllowedUserIDs, logger)
+	whoopProvider := whoop.NewOAuthProvider(tokenStore, oauthCfg, logger)
+	whoopReports := whoop.NewUseCase(whoopProvider, loc)
 	deps := bot.Deps{
-		Tokens:      tokenStore,
-		Notes:       notesRepo,
+		Whoop:       whoopReports,
+		FatSecret:   fsReports,
 		OAuthConfig: oauthCfg,
-		FatSecret:   fsClient,
 		States:      states,
 		Location:    loc,
 		Logger:      logger,
-		NewWhoopClient: func(ctx context.Context, ts oauth2.TokenSource) *whoop.Client {
-			return whoop.NewClientWithTokenSource(ctx, ts, whoop.Options{})
-		},
 	}
 	tb, err := bot.New(cfg.TelegramBotToken, allowlist, deps) //nolint:contextcheck // telebot HandlerFunc has no inheritable context.Context; handlers create their own.
 	if err != nil {
@@ -115,7 +112,7 @@ func run(parent context.Context) error {
 	cb := server.NewCallbackHandler(oauthCfg, states, tokenStore, tb, logger)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           server.Router(cb),
+		Handler:           server.Router(cb, pool),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

@@ -6,60 +6,49 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
-	"strconv"
-	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
 	tele "gopkg.in/telebot.v3"
 
-	"fitlog/internal/auth"
-	"fitlog/internal/domain"
 	"fitlog/internal/fatsecret"
+	"fitlog/internal/reportfmt"
 	"fitlog/internal/whoop"
 )
 
-// Deps bundles the bot's external collaborators. Held in a struct so handlers
-// can be methods on Bot rather than closures over a half-dozen vars.
-type Deps struct {
-	Tokens         *auth.TokenStore
-	Notes          NotesRepo
-	OAuthConfig    *oauth2.Config
-	FatSecret      *fatsecret.Client
-	States         StateIssuer
-	Location       *time.Location
-	Logger         *slog.Logger
-	NewWhoopClient func(ctx context.Context, ts oauth2.TokenSource) *whoop.Client
-}
+const (
+	HealthButton    = "Здоровье🫀"
+	NutritionButton = "Питание 🥑"
+)
 
-// NotesRepo is the slice of storage.NotesRepo the bot needs. Defined as an
-// interface so the bot package stays independent of pgx.
-type NotesRepo interface {
-	Insert(ctx context.Context, n domain.Note) (int64, error)
-	ListBetween(ctx context.Context, from, to time.Time) ([]domain.Note, error)
-}
-
-// StateIssuer is the slice of server.StateStore the bot needs.
-// Defined as an interface to keep the bot package independent of the server
-// package (avoids an import cycle: server depends on bot via Notifier).
+// StateIssuer is the small OAuth-state capability required by the delivery
+// layer. The concrete in-memory implementation lives in internal/server.
 type StateIssuer interface {
 	Issue(chatID int64) (string, error)
 }
 
-// Bot is the long-poll telebot wrapper plus the deps it dispatches over.
+type Deps struct {
+	Whoop       whoop.ReportUseCase
+	FatSecret   fatsecret.ReportUseCase
+	OAuthConfig *oauth2.Config
+	States      StateIssuer
+	Location    *time.Location
+	Logger      *slog.Logger
+}
+
+// Bot is deliberately a thin delivery adapter. Provider calls, aggregation
+// and formatting live in the Whoop and FatSecret use cases.
 type Bot struct {
 	b    *tele.Bot
 	deps Deps
+	menu *tele.ReplyMarkup
 }
 
-// New builds a Bot. The telebot is created with long-polling; no webhook.
 func New(token string, allowlist *Allowlist, deps Deps) (*Bot, error) {
 	tb, err := tele.NewBot(tele.Settings{
 		Token: token,
-		// Single-user bot: process updates serially. Besides keeping things
-		// simple, this prevents concurrent handlers from each refreshing the
-		// rotating Whoop refresh token at once, which would invalidate it and
-		// force a re-auth.
+		// Whoop refresh tokens rotate. Serial processing prevents two reports
+		// from refreshing the same token concurrently.
 		Synchronous: true,
 		Poller:      &tele.LongPoller{Timeout: 10 * time.Second},
 		OnError: func(err error, c tele.Context) {
@@ -73,45 +62,42 @@ func New(token string, allowlist *Allowlist, deps Deps) (*Bot, error) {
 		return nil, fmt.Errorf("telebot init: %w", err)
 	}
 
-	// Recover from a handler panic and route it through OnError instead of
-	// letting it unwind the goroutine and crash the whole process (which would
-	// also take down the OAuth callback server). Registered first so it also
-	// guards the allowlist middleware.
+	menu := mainMenu()
+
+	bot := &Bot{b: tb, deps: deps, menu: menu}
 	tb.Use(recoverMiddleware(deps.Logger))
 	tb.Use(allowlist.Middleware())
-
-	bot := &Bot{b: tb, deps: deps}
 	bot.registerHandlers()
 
-	// Publish the command list to Telegram so they appear in the "/"
-	// auto-suggest menu and get highlighted in chat. Best-effort: a network
-	// blip here shouldn't stop the bot from starting.
+	// SetCommands replaces the old Telegram menu, leaving exactly one command.
 	if err := tb.SetCommands(botCommands()); err != nil {
 		deps.Logger.Warn("set telegram commands", "err", err)
 	}
-
 	return bot, nil
 }
 
-// botCommands returns the slash commands shown in Telegram's UI. Order matters —
-// it's the order the user sees in the menu.
-func botCommands() []tele.Command {
-	return []tele.Command{
-		{Text: "info", Description: "Подробный отчёт за день (можно с датой)"},
-		{Text: "week", Description: "Сводка за 7 дней + дайджест калорий"},
-		{Text: "month", Description: "Сводка за 30 дней + дайджест калорий"},
-		{Text: "sleep", Description: "Сон за N дней (default 7)"},
-		{Text: "recovery", Description: "Recovery за N дней с трендом HRV"},
-		{Text: "workouts", Description: "Тренировки за N дней"},
-		{Text: "food", Description: "Питание за день (today/yesterday)"},
-		{Text: "log", Description: "Записать вес / талию / %жира / заметку"},
-		{Text: "status", Description: "Состояние подключений Whoop и FatSecret"},
-		{Text: "connect_whoop", Description: "Подключить Whoop через OAuth"},
-		{Text: "help", Description: "Показать список команд"},
-	}
+func mainMenu() *tele.ReplyMarkup {
+	menu := &tele.ReplyMarkup{ResizeKeyboard: true, IsPersistent: true, Placeholder: "Выбери раздел"}
+	menu.Reply(menu.Row(menu.Text(HealthButton), menu.Text(NutritionButton)))
+	return menu
 }
 
-// Start runs the long-poll loop. Blocks until ctx is cancelled or Stop is called.
+func botCommands() []tele.Command {
+	return []tele.Command{{
+		Text:        "health_summary",
+		Description: "Саммари здоровья и питания за 30 дней",
+	}}
+}
+
+func (b *Bot) registerHandlers() {
+	b.b.Handle(HealthButton, b.handleHealth)
+	b.b.Handle(NutritionButton, b.handleNutrition)
+	b.b.Handle("/health_summary", b.handleHealthSummary)
+	// Unknown text, including Telegram's conventional /start, only opens the
+	// two-button menu and does not create another bot command.
+	b.b.Handle(tele.OnText, b.handleMenu)
+}
+
 func (b *Bot) Start(ctx context.Context) {
 	done := make(chan struct{})
 	go func() {
@@ -123,110 +109,118 @@ func (b *Bot) Start(ctx context.Context) {
 	<-done
 }
 
-// Stop signals the long-poll loop to exit. Safe to call from another goroutine.
 func (b *Bot) Stop() { b.b.Stop() }
 
-// NotifyOAuthSuccess implements server.Notifier.
 func (b *Bot) NotifyOAuthSuccess(_ context.Context, chatID int64) {
-	if _, err := b.b.Send(&tele.Chat{ID: chatID}, "✓ Whoop подключён"); err != nil {
+	if _, err := b.b.Send(&tele.Chat{ID: chatID}, "✓ Whoop подключён. Нажми «Здоровье🫀».", b.menu); err != nil {
 		b.deps.Logger.Warn("notify oauth success", "err", err)
 	}
 }
 
-// NotifyOAuthFailure implements server.Notifier.
 func (b *Bot) NotifyOAuthFailure(_ context.Context, chatID int64, reason string) {
-	if _, err := b.b.Send(&tele.Chat{ID: chatID}, "✗ "+reason); err != nil {
+	if _, err := b.b.Send(&tele.Chat{ID: chatID}, "✗ "+reason, b.menu); err != nil {
 		b.deps.Logger.Warn("notify oauth failure", "err", err)
 	}
 }
 
-func (b *Bot) registerHandlers() {
-	b.b.Handle("/start", b.handleStart)
-	b.b.Handle("/help", b.handleStart)
-	b.b.Handle("/connect_whoop", b.handleConnectWhoop)
-	b.b.Handle("/info", b.handleInfo)
-	b.b.Handle("/log", b.handleLog)
-	b.b.Handle("/week", b.makePeriodHandler(7))
-	b.b.Handle("/month", b.makePeriodHandler(30))
-	b.b.Handle("/sleep", b.handleSleep)
-	b.b.Handle("/recovery", b.handleRecovery)
-	b.b.Handle("/workouts", b.handleWorkouts)
-	b.b.Handle("/food", b.handleFood)
-	b.b.Handle("/status", b.handleStatus)
+func (b *Bot) handleMenu(c tele.Context) error {
+	return c.Send("Выбери раздел:", b.menu)
 }
 
-// recoverMiddleware turns a panic in any handler into a returned error, so
-// telebot's OnError reports it and the process keeps running.
+func (b *Bot) handleHealth(c tele.Context) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	report, err := b.deps.Whoop.Execute(ctx, whoop.Today(time.Now(), b.deps.Location))
+	if err != nil {
+		if errors.Is(err, whoop.ErrNotConnected) {
+			return b.sendWhoopConnect(c)
+		}
+		b.deps.Logger.Warn("whoop daily report", "err", err)
+		return b.reply(c, "Не удалось получить данные Whoop: "+reportfmt.Escape(err.Error()))
+	}
+	return b.reply(c, report)
+}
+
+func (b *Bot) handleNutrition(c tele.Context) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	report, err := b.deps.FatSecret.Execute(ctx, fatsecret.Today(time.Now(), b.deps.Location))
+	if err != nil {
+		b.deps.Logger.Warn("fatsecret daily report", "err", err)
+		return b.reply(c, "Не удалось получить данные FatSecret: "+reportfmt.Escape(err.Error()))
+	}
+	return b.reply(c, report)
+}
+
+func (b *Bot) handleHealthSummary(c tele.Context) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	now := time.Now()
+	var output string
+	whoopReport, whoopErr := b.deps.Whoop.Execute(ctx, whoop.LastCompletedDays(now, b.deps.Location, 30))
+	if whoopErr != nil {
+		b.deps.Logger.Warn("whoop monthly report", "err", whoopErr)
+		if errors.Is(whoopErr, whoop.ErrNotConnected) {
+			output = "🫀 *Whoop* — не подключён"
+		} else {
+			output = "🫀 *Whoop* — ошибка: " + reportfmt.Escape(whoopErr.Error())
+		}
+	} else {
+		output = whoopReport
+	}
+
+	fatSecretReport, fatSecretErr := b.deps.FatSecret.Execute(ctx, fatsecret.LastCompletedDays(now, b.deps.Location, 30))
+	if fatSecretErr != nil {
+		b.deps.Logger.Warn("fatsecret monthly report", "err", fatSecretErr)
+		output += "\n\n🥑 *FatSecret* — ошибка: " + reportfmt.Escape(fatSecretErr.Error())
+	} else {
+		output += "\n\n" + fatSecretReport
+	}
+	return b.reply(c, output)
+}
+
+func (b *Bot) sendWhoopConnect(c tele.Context) error {
+	state, err := b.deps.States.Issue(c.Chat().ID)
+	if err != nil {
+		b.deps.Logger.Error("issue oauth state", "err", err)
+		return b.reply(c, "Не удалось начать подключение Whoop\\.")
+	}
+	markup := &tele.ReplyMarkup{}
+	button := markup.URL("Подключить Whoop", b.deps.OAuthConfig.AuthCodeURL(state))
+	markup.Inline(markup.Row(button))
+	return c.Send("Whoop ещё не подключён\\. Авторизация действует 10 минут\\.",
+		&tele.SendOptions{ParseMode: tele.ModeMarkdownV2, DisableWebPagePreview: true}, markup)
+}
+
+func (b *Bot) reply(c tele.Context, report string) error {
+	for i, chunk := range reportfmt.Split(report) {
+		options := &tele.SendOptions{ParseMode: tele.ModeMarkdownV2, DisableWebPagePreview: true}
+		if i == 0 {
+			if err := c.Send(chunk, options, b.menu); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := c.Send(chunk, options); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func recoverMiddleware(logger *slog.Logger) tele.MiddlewareFunc {
 	return func(next tele.HandlerFunc) tele.HandlerFunc {
 		return func(c tele.Context) (err error) {
 			defer func() {
-				if r := recover(); r != nil {
-					logger.Error("handler panic", "panic", r, "stack", string(debug.Stack()))
-					err = fmt.Errorf("panic: %v", r)
+				if recovered := recover(); recovered != nil {
+					logger.Error("handler panic", "panic", recovered, "stack", string(debug.Stack()))
+					err = fmt.Errorf("panic: %v", recovered)
 				}
 			}()
 			return next(c)
 		}
 	}
-}
-
-// maxArgDays bounds the day-count argument for /sleep, /recovery, /workouts.
-// Whoop pagination returns at most maxPages*limit records; a far larger window
-// would silently truncate, so we clamp the request instead.
-const maxArgDays = 90
-
-// argInt parses the first positional argument as an int in [1, maxArgDays],
-// or returns def.
-func argInt(c tele.Context, def int) int {
-	args := c.Args()
-	if len(args) == 0 {
-		return def
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(args[0]))
-	if err != nil || n <= 0 {
-		return def
-	}
-	if n > maxArgDays {
-		return maxArgDays
-	}
-	return n
-}
-
-// reply sends s in MarkdownV2 mode and logs send errors.
-func (b *Bot) reply(c tele.Context, s string) error {
-	return c.Send(s, &tele.SendOptions{ParseMode: tele.ModeMarkdownV2, DisableWebPagePreview: true})
-}
-
-// loadWhoopClient fetches the encrypted Whoop token, builds a persisting
-// token source, and returns a Whoop client that will auto-refresh+persist.
-// If no token is stored, returns a sentinel "not connected" error.
-var errWhoopNotConnected = errors.New("whoop not connected")
-
-func (b *Bot) loadWhoopClient(ctx context.Context) (*whoop.Client, error) {
-	tok, err := b.deps.Tokens.Get(ctx, auth.SourceWhoop)
-	if err != nil {
-		if errors.Is(err, auth.ErrNotFound) {
-			return nil, errWhoopNotConnected
-		}
-		return nil, fmt.Errorf("load whoop token: %w", err)
-	}
-
-	initial := &oauth2.Token{
-		AccessToken:  tok.AccessToken,
-		RefreshToken: tok.RefreshToken,
-		Expiry:       tok.ExpiresAt,
-	}
-	ts := whoop.MakeTokenSource(ctx, b.deps.OAuthConfig, initial, func(updated *oauth2.Token) { //nolint:contextcheck // persist fires during async token refresh and must outlive the request ctx.
-		saveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := b.deps.Tokens.Save(saveCtx, auth.SourceWhoop, &auth.Token{
-			AccessToken:  updated.AccessToken,
-			RefreshToken: updated.RefreshToken,
-			ExpiresAt:    updated.Expiry,
-		}); err != nil {
-			b.deps.Logger.Error("persist refreshed whoop token", "err", err)
-		}
-	})
-	return b.deps.NewWhoopClient(ctx, ts), nil
 }

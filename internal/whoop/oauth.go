@@ -13,7 +13,7 @@ const (
 	APIBase  = "https://api.prod.whoop.com/developer"
 )
 
-// DefaultScopes are the scopes /connect_whoop requests. `offline` is REQUIRED
+// DefaultScopes are requested by the OAuth button. `offline` is REQUIRED
 // to get a refresh token back; without it, the token expires in an hour and
 // the bot dies overnight.
 var DefaultScopes = []string{

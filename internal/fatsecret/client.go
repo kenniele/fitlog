@@ -102,7 +102,7 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
-// ProfileGet pings `profile.get`; used by /status and as a sanity check.
+// ProfileGet pings `profile.get`; useful as a credential sanity check.
 func (c *Client) ProfileGet(ctx context.Context) (string, error) {
 	body, err := c.do(ctx, map[string]string{"method": "profile.get"})
 	if err != nil {
