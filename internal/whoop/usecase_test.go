@@ -21,6 +21,14 @@ type reportAPI struct {
 	workouts   []domain.Workout
 }
 
+func TestYesterdayRequestUsesPreviousCalendarDay(t *testing.T) {
+	loc := time.FixedZone("UTC+3", 3*60*60)
+	now := time.Date(2026, 7, 22, 0, 30, 0, 0, loc)
+	request := Yesterday(now, loc)
+	require.Equal(t, "2026-07-21", request.From.Format("2006-01-02"))
+	require.Equal(t, "2026-07-22", request.To.Format("2006-01-02"))
+}
+
 func (a reportAPI) Cycles(context.Context, domain.TimeRange, int) ([]domain.Cycle, error) {
 	return a.cycles, nil
 }
@@ -50,7 +58,7 @@ func TestUseCaseDailyPipeline(t *testing.T) {
 	}
 	u := NewUseCase(reportProvider{api: api}, time.UTC)
 
-	output, err := u.Execute(context.Background(), Today(day.Add(time.Hour), time.UTC))
+	output, err := u.Execute(context.Background(), Day(day.Add(time.Hour), time.UTC))
 	require.NoError(t, err)
 	require.Contains(t, output, "*Здоровье · 22 июля 2026*")
 	require.Contains(t, output, "*Recovery* 75% 🟢")

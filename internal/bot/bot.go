@@ -69,7 +69,7 @@ func New(token string, allowlist *Allowlist, deps Deps) (*Bot, error) {
 	tb.Use(allowlist.Middleware())
 	bot.registerHandlers()
 
-	// SetCommands replaces the old Telegram menu, leaving exactly one command.
+	// SetCommands replaces the old Telegram command menu with the two report commands.
 	if err := tb.SetCommands(botCommands()); err != nil {
 		deps.Logger.Warn("set telegram commands", "err", err)
 	}
@@ -83,16 +83,17 @@ func mainMenu() *tele.ReplyMarkup {
 }
 
 func botCommands() []tele.Command {
-	return []tele.Command{{
-		Text:        "health_summary",
-		Description: "Саммари здоровья и питания за 30 дней",
-	}}
+	return []tele.Command{
+		{Text: "health_summary", Description: "Саммари здоровья и питания за 30 дней"},
+		{Text: "info", Description: "Здоровье и питание за выбранную дату"},
+	}
 }
 
 func (b *Bot) registerHandlers() {
 	b.b.Handle(HealthButton, b.handleHealth)
 	b.b.Handle(NutritionButton, b.handleNutrition)
 	b.b.Handle("/health_summary", b.handleHealthSummary)
+	b.b.Handle("/info", b.handleInfo)
 	// Unknown text, including Telegram's conventional /start, only opens the
 	// two-button menu and does not create another bot command.
 	b.b.Handle(tele.OnText, b.handleMenu)
@@ -131,7 +132,7 @@ func (b *Bot) handleHealth(c tele.Context) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	report, err := b.deps.Whoop.Execute(ctx, whoop.Today(time.Now(), b.deps.Location))
+	report, err := b.deps.Whoop.Execute(ctx, whoop.Yesterday(time.Now(), b.deps.Location))
 	if err != nil {
 		if errors.Is(err, whoop.ErrNotConnected) {
 			return b.sendWhoopConnect(c)
@@ -140,6 +141,42 @@ func (b *Bot) handleHealth(c tele.Context) error {
 		return b.reply(c, "Не удалось получить данные Whoop: "+reportfmt.Escape(err.Error()))
 	}
 	return b.reply(c, report)
+}
+
+func (b *Bot) handleInfo(c tele.Context) error {
+	args := c.Args()
+	if len(args) != 1 {
+		return b.reply(c, "Использование: /info ГГГГ\\-ММ\\-ДД")
+	}
+	day, err := time.ParseInLocation("2006-01-02", args[0], b.deps.Location)
+	if err != nil {
+		return b.reply(c, "Не понял дату\\. Использование: /info ГГГГ\\-ММ\\-ДД")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	var output string
+	whoopReport, whoopErr := b.deps.Whoop.Execute(ctx, whoop.Day(day, b.deps.Location))
+	if whoopErr != nil {
+		b.deps.Logger.Warn("whoop dated report", "err", whoopErr, "day", day.Format("2006-01-02"))
+		if errors.Is(whoopErr, whoop.ErrNotConnected) {
+			output = "🫀 *Whoop* — не подключён"
+		} else {
+			output = "🫀 *Whoop* — ошибка: " + reportfmt.Escape(whoopErr.Error())
+		}
+	} else {
+		output = whoopReport
+	}
+
+	fatSecretReport, fatSecretErr := b.deps.FatSecret.Execute(ctx, fatsecret.Day(day, b.deps.Location))
+	if fatSecretErr != nil {
+		b.deps.Logger.Warn("fatsecret dated report", "err", fatSecretErr, "day", day.Format("2006-01-02"))
+		output += "\n\n🥑 *FatSecret* — ошибка: " + reportfmt.Escape(fatSecretErr.Error())
+	} else {
+		output += "\n\n" + fatSecretReport
+	}
+	return b.reply(c, output)
 }
 
 func (b *Bot) handleNutrition(c tele.Context) error {

@@ -24,6 +24,7 @@ func TestBotSurfaceHasTwoButtonsAndOneCommand(t *testing.T) {
 	require.Equal(t, NutritionButton, menu.ReplyKeyboard[0][1].Text)
 
 	commands := botCommands()
-	require.Len(t, commands, 1)
+	require.Len(t, commands, 2)
 	require.Equal(t, "health_summary", commands[0].Text)
+	require.Equal(t, "info", commands[1].Text)
 }

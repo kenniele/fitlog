@@ -1,6 +1,6 @@
 # fitlog
 
-Personal Telegram bot that pulls fitness data from **Whoop** and nutrition data from **FatSecret** on demand. The normal UI is a persistent two-button keyboard; the only slash command is a 30-day summary. Access is restricted by Telegram ID. There are no schedulers or background API polls.
+Personal Telegram bot that pulls fitness data from **Whoop** and nutrition data from **FatSecret** on demand. The normal UI is a persistent two-button keyboard; slash commands provide a dated report and a 30-day summary. Access is restricted by Telegram ID. There are no schedulers or background API polls.
 
 ## Stack
 
@@ -43,9 +43,10 @@ In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀*
 
 | Action | Result |
 | ------ | ------ |
-| `Здоровье🫀` | Today's Whoop sleep, recovery, strain, and workouts |
+| `Здоровье🫀` | Yesterday's completed Whoop sleep, recovery, strain, and workouts |
 | `Питание 🥑` | Today's FatSecret meal groups and macros |
 | `/health_summary` | Whoop and FatSecret summary for the previous 30 completed days |
+| `/info YYYY-MM-DD` | Whoop and FatSecret report for a selected calendar day |
 
 The two provider modules expose the same application pipeline: `Fetch → Transform → Format`. Telegram handlers only select a request and deliver the formatted result.
 

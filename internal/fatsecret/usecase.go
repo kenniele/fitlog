@@ -24,11 +24,13 @@ type ReportRequest struct {
 	To   time.Time
 }
 
-func Today(now time.Time, loc *time.Location) ReportRequest {
-	now = now.In(loc)
-	from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+func Day(day time.Time, loc *time.Location) ReportRequest {
+	day = day.In(loc)
+	from := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
 	return ReportRequest{Mode: DailyReport, From: from, To: from.AddDate(0, 0, 1)}
 }
+
+func Today(now time.Time, loc *time.Location) ReportRequest { return Day(now, loc) }
 
 func LastCompletedDays(now time.Time, loc *time.Location, days int) ReportRequest {
 	now = now.In(loc)
