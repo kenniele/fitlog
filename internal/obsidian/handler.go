@@ -30,7 +30,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	article, err := h.useCase.Execute(r.Context(), ArticleRequest(id))
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrInvalidID), errors.Is(err, ErrNoArticles):
+		case errors.Is(err, ErrInvalidID), errors.Is(err, ErrExpiredID), errors.Is(err, ErrNoArticles):
 			http.NotFound(w, r)
 		case errors.Is(err, ErrTooLarge):
 			http.Error(w, "article is too large", http.StatusRequestEntityTooLarge)

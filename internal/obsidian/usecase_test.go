@@ -9,8 +9,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"fitlog/internal/auth"
 
@@ -32,6 +34,8 @@ func TestUseCaseRandomFetchTransformFormat(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "article.md"), []byte(`---
 title: Хорошая статья
 tags: [test]
+status: mature
+publish: true
 ---
 ## Идея
 
@@ -61,7 +65,40 @@ tags: [test]
 	byID, err := useCase.Execute(context.Background(), ArticleRequest(article.ID))
 	require.NoError(t, err)
 	require.Equal(t, article.Title, byID.Title)
-	require.NotEqual(t, article.ID, byID.ID, "every publication must get a fresh opaque id")
+	require.Equal(t, article.ID, byID.ID)
+}
+
+func TestArticleIDExpiresAfterSevenDays(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "article.md"), []byte("---\nstatus: mature\npublish: true\n---\n# Article"), 0o600))
+	useCase := NewUseCase(root, newTestTokenCipher(t))
+	issuedAt := time.Date(2026, time.July, 22, 12, 0, 0, 0, time.UTC)
+	useCase.now = func() time.Time { return issuedAt }
+
+	article, err := useCase.Execute(context.Background(), RandomRequest())
+	require.NoError(t, err)
+
+	useCase.now = func() time.Time { return issuedAt.Add(articleLinkTTL - time.Second) }
+	_, err = useCase.Execute(context.Background(), ArticleRequest(article.ID))
+	require.NoError(t, err)
+
+	useCase.now = func() time.Time { return issuedAt.Add(articleLinkTTL) }
+	_, err = useCase.Execute(context.Background(), ArticleRequest(article.ID))
+	require.ErrorIs(t, err, ErrExpiredID)
+}
+
+func TestPublishFalseImmediatelyRevokesIssuedLink(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "article.md")
+	require.NoError(t, os.WriteFile(path, []byte("---\npublish: true\n---\n# Article"), 0o600))
+	useCase := NewUseCase(root, newTestTokenCipher(t))
+
+	article, err := useCase.Execute(context.Background(), RandomRequest())
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, []byte("---\npublish: false\n---\n# Article"), 0o600))
+
+	_, err = useCase.Execute(context.Background(), ArticleRequest(article.ID))
+	require.ErrorIs(t, err, ErrInvalidID)
 }
 
 func TestUseCaseRejectsTraversalID(t *testing.T) {
@@ -82,9 +119,30 @@ func TestUseCaseNotConfiguredAndEmpty(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoArticles)
 }
 
+func TestMarkdownFilesRequireExplicitPublishTrue(t *testing.T) {
+	root := t.TempDir()
+	writeArticle := func(relative, frontmatter string) {
+		t.Helper()
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		content := "---\n" + frontmatter + "\n---\n# Article"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	}
+
+	writeArticle("published.md", "status: growing\npublish: true")
+	writeArticle("private.md", "status: mature\npublish: false")
+	writeArticle("missing.md", "status: mature")
+	writeArticle("case-insensitive.md", "publish: TRUE")
+
+	paths, err := markdownFiles(context.Background(), root)
+	require.NoError(t, err)
+	sort.Strings(paths)
+	require.Equal(t, []string{"case-insensitive.md", "published.md"}, paths)
+}
+
 func TestHandlerServesArticleWithSecurityHeaders(t *testing.T) {
 	root := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(root, "hello.md"), []byte("# Hello\n\nWorld"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "hello.md"), []byte("---\nstatus: mature\npublish: true\n---\n# Hello\n\nWorld"), 0o600))
 	useCase := NewUseCase(root, newTestTokenCipher(t))
 	random, err := useCase.Execute(context.Background(), RandomRequest())
 	require.NoError(t, err)
@@ -117,6 +175,7 @@ func TestHandlerErrorStatus(t *testing.T) {
 		want int
 	}{
 		{ErrInvalidID, http.StatusNotFound},
+		{ErrExpiredID, http.StatusNotFound},
 		{ErrNotConfigured, http.StatusServiceUnavailable},
 		{ErrTooLarge, http.StatusRequestEntityTooLarge},
 		{errors.New("boom"), http.StatusInternalServerError},

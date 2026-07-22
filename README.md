@@ -55,7 +55,7 @@ The provider modules expose the same application pipeline: `Fetch → Transform 
 
 ## Obsidian articles
 
-Point `OBSIDIAN_ARTICLES_PATH` directly at the folder whose Markdown notes may be public. Nested folders are supported; hidden directories, symlinks, and non-Markdown files are ignored. YAML frontmatter is removed, `title` and the first H1 are recognised, and common Markdown/Obsidian constructs receive lightweight HTML formatting.
+Point `OBSIDIAN_ARTICLES_PATH` directly at the folder whose Markdown notes may be public. Nested folders are supported; hidden directories, symlinks, and non-Markdown files are ignored. A note participates in random selection only when its YAML frontmatter explicitly contains `publish: true`; `publish: false`, a missing field, or an invalid value keeps it private. This makes publication opt-in and lets the vault own the filtering policy without a fitlog redeploy. YAML frontmatter is removed, `title` and the first H1 are recognised, and common Markdown/Obsidian constructs receive lightweight HTML formatting.
 
 An `obsidian-git` vault can live next to fitlog and sync independently. For example:
 
@@ -66,7 +66,7 @@ PUBLIC_BASE_URL=https://fitlog.example.com
 
 Docker Compose mounts this host path at `/vault` read-only. The Caddy route already forwarding the fitlog origin to `app:8080` also serves `/articles/...`; no Telegraph account or additional service is required.
 
-Article URLs contain an opaque AES-GCM token with a fresh random nonce, rather than a filename or an encoded vault path. There is no separate setting for this: fitlog derives an isolated article-link key from `FITLOG_TOKEN_ENCRYPTION_KEY`. Tokens cannot be enumerated or modified in practice, while anyone who receives a complete URL can still open it. Rotating `FITLOG_TOKEN_ENCRYPTION_KEY` invalidates previously issued article links.
+Article URLs contain an opaque AES-GCM token with a fresh random nonce and a protected expiry timestamp, rather than a filename or an encoded vault path. There is no separate setting for this: fitlog derives an isolated article-link key from `FITLOG_TOKEN_ENCRYPTION_KEY`. Tokens cannot be enumerated or modified in practice, expire exactly seven days after issue, and remain usable by anyone who receives the complete URL until then. Rotating `FITLOG_TOKEN_ENCRYPTION_KEY` immediately invalidates all issued article links.
 
 ## Troubleshooting
 

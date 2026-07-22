@@ -7,21 +7,30 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
-const maxArticleBytes = 2 << 20 // 2 MiB
+const (
+	maxArticleBytes        = 2 << 20 // 2 MiB
+	maxFrontmatterScanSize = 64 << 10
+	articleLinkTTL         = 7 * 24 * time.Hour
+	articleTokenVersion    = 1
+)
 
 var (
 	ErrNotConfigured = errors.New("obsidian articles path is not configured")
 	ErrNoArticles    = errors.New("no markdown articles found")
 	ErrInvalidID     = errors.New("invalid article id")
+	ErrExpiredID     = errors.New("article link expired")
 	ErrTooLarge      = errors.New("article is too large")
 )
 
@@ -51,7 +60,7 @@ type PublishedArticle struct {
 	HTML  string
 }
 
-// TokenCipher turns a relative vault path into an opaque, authenticated token.
+// TokenCipher turns an article payload into an opaque, authenticated token.
 // auth.Cipher implements this interface with AES-GCM.
 type TokenCipher interface {
 	SealString(string) ([]byte, error)
@@ -69,10 +78,17 @@ type ReportUseCase interface {
 type UseCase struct {
 	root   string
 	tokens TokenCipher
+	now    func() time.Time
 }
 
 func NewUseCase(root string, tokens TokenCipher) *UseCase {
-	return &UseCase{root: strings.TrimSpace(root), tokens: tokens}
+	return &UseCase{root: strings.TrimSpace(root), tokens: tokens, now: time.Now}
+}
+
+type articleToken struct {
+	Version   int    `json:"v"`
+	Path      string `json:"p"`
+	ExpiresAt int64  `json:"exp"`
 }
 
 func (u *UseCase) Fetch(ctx context.Context, request Request) (RawArticle, error) {
@@ -87,7 +103,7 @@ func (u *UseCase) Fetch(ctx context.Context, request Request) (RawArticle, error
 		root = resolvedRoot
 	}
 
-	var relative string
+	var relative, id string
 	if request.Random {
 		paths, err := markdownFiles(ctx, root)
 		if err != nil {
@@ -101,15 +117,16 @@ func (u *UseCase) Fetch(ctx context.Context, request Request) (RawArticle, error
 			return RawArticle{}, fmt.Errorf("choose random article: %w", err)
 		}
 		relative = paths[index.Int64()]
+		id, err = u.mintArticleID(relative)
+		if err != nil {
+			return RawArticle{}, err
+		}
 	} else {
-		sealed, err := base64.RawURLEncoding.DecodeString(request.ID)
+		relative, err = u.openArticleID(request.ID)
 		if err != nil {
-			return RawArticle{}, ErrInvalidID
+			return RawArticle{}, err
 		}
-		relative, err = u.tokens.OpenString(sealed)
-		if err != nil {
-			return RawArticle{}, ErrInvalidID
-		}
+		id = request.ID
 	}
 
 	fullPath, cleanRelative, err := safeMarkdownPath(root, relative)
@@ -133,12 +150,53 @@ func (u *UseCase) Fetch(ctx context.Context, request Request) (RawArticle, error
 	if err != nil {
 		return RawArticle{}, fmt.Errorf("read article: %w", err)
 	}
-	sealed, err := u.tokens.SealString(cleanRelative)
-	if err != nil {
-		return RawArticle{}, fmt.Errorf("seal article id: %w", err)
+	if !publishEnabled(string(content)) {
+		return RawArticle{}, ErrInvalidID
 	}
-	id := base64.RawURLEncoding.EncodeToString(sealed)
 	return RawArticle{ID: id, Filename: filepath.Base(cleanRelative), Content: string(content)}, nil
+}
+
+func (u *UseCase) mintArticleID(relative string) (string, error) {
+	now := u.currentTime()
+	payload, err := json.Marshal(articleToken{
+		Version:   articleTokenVersion,
+		Path:      filepath.ToSlash(relative),
+		ExpiresAt: now.Add(articleLinkTTL).Unix(),
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal article id: %w", err)
+	}
+	sealed, err := u.tokens.SealString(string(payload))
+	if err != nil {
+		return "", fmt.Errorf("seal article id: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(sealed), nil
+}
+
+func (u *UseCase) openArticleID(id string) (string, error) {
+	sealed, err := base64.RawURLEncoding.DecodeString(id)
+	if err != nil {
+		return "", ErrInvalidID
+	}
+	plain, err := u.tokens.OpenString(sealed)
+	if err != nil {
+		return "", ErrInvalidID
+	}
+	var payload articleToken
+	if err := json.Unmarshal([]byte(plain), &payload); err != nil || payload.Version != articleTokenVersion || payload.Path == "" || payload.ExpiresAt <= 0 {
+		return "", ErrInvalidID
+	}
+	if !u.currentTime().Before(time.Unix(payload.ExpiresAt, 0)) {
+		return "", ErrExpiredID
+	}
+	return payload.Path, nil
+}
+
+func (u *UseCase) currentTime() time.Time {
+	if u.now == nil {
+		return time.Now()
+	}
+	return u.now()
 }
 
 func (u *UseCase) Transform(raw RawArticle) Article {
@@ -180,7 +238,14 @@ func markdownFiles(ctx context.Context, root string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		paths = append(paths, relative)
+		relative = filepath.ToSlash(relative)
+		published, err := hasPublishEnabled(path)
+		if err != nil {
+			return err
+		}
+		if published {
+			paths = append(paths, relative)
+		}
 		return nil
 	})
 	if err != nil {
@@ -190,6 +255,25 @@ func markdownFiles(ctx context.Context, root string) ([]string, error) {
 		return nil, fmt.Errorf("scan obsidian articles: %w", err)
 	}
 	return paths, nil
+}
+
+func hasPublishEnabled(path string) (bool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return false, fmt.Errorf("open article metadata: %w", err)
+	}
+	defer file.Close()
+
+	prefix, err := io.ReadAll(io.LimitReader(file, maxFrontmatterScanSize))
+	if err != nil {
+		return false, fmt.Errorf("read article metadata: %w", err)
+	}
+	return publishEnabled(string(prefix)), nil
+}
+
+func publishEnabled(markdown string) bool {
+	_, fields, ok := parseFrontmatter(markdown)
+	return ok && strings.EqualFold(fields["publish"], "true")
 }
 
 func safeMarkdownPath(root, relative string) (string, string, error) {
@@ -215,22 +299,30 @@ func safeMarkdownPath(root, relative string) (string, string, error) {
 }
 
 func stripFrontmatter(markdown string) (string, string) {
+	body, fields, ok := parseFrontmatter(markdown)
+	if !ok {
+		return strings.TrimPrefix(markdown, "\ufeff"), ""
+	}
+	return body, fields["title"]
+}
+
+func parseFrontmatter(markdown string) (string, map[string]string, bool) {
 	markdown = strings.TrimPrefix(markdown, "\ufeff")
 	lines := strings.Split(markdown, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return markdown, ""
+		return markdown, nil, false
 	}
-	var title string
+	fields := make(map[string]string)
 	for i := 1; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
 		if line == "---" {
-			return strings.Join(lines[i+1:], "\n"), title
+			return strings.Join(lines[i+1:], "\n"), fields, true
 		}
-		if key, value, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(key), "title") {
-			title = strings.Trim(strings.TrimSpace(value), `"'`)
+		if key, value, ok := strings.Cut(line, ":"); ok {
+			fields[strings.ToLower(strings.TrimSpace(key))] = strings.Trim(strings.TrimSpace(value), `"'`)
 		}
 	}
-	return markdown, ""
+	return markdown, nil, false
 }
 
 func extractTitle(markdown, frontmatterTitle, filename string) (string, string) {
