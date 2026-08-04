@@ -112,9 +112,8 @@ func (b *Bot) registerHandlers() {
 func (b *Bot) handleNutritionAnalysis(c tele.Context) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	report, err := b.deps.FatSecret.Execute(ctx, fatsecret.NutritionAnalysis(time.Now(), b.deps.Location))
+	report, err := b.executeFatSecret(ctx, fatsecret.NutritionAnalysis(time.Now(), b.deps.Location))
 	if err != nil {
-		b.deps.Logger.Warn("nutrition deficit analysis", "err", err)
 		return b.reply(c, "Не удалось рассчитать дефицит: "+reportfmt.Escape(err.Error()))
 	}
 	return b.reply(c, report)
@@ -210,9 +209,8 @@ func (b *Bot) handleInfo(c tele.Context) error {
 		output = whoopReport
 	}
 
-	fatSecretReport, fatSecretErr := b.deps.FatSecret.Execute(ctx, fatsecret.Day(day, b.deps.Location))
+	fatSecretReport, fatSecretErr := b.executeFatSecret(ctx, fatsecret.Day(day, b.deps.Location))
 	if fatSecretErr != nil {
-		b.deps.Logger.Warn("fatsecret dated report", "err", fatSecretErr, "day", day.Format("2006-01-02"))
 		output += "\n\n🥑 *FatSecret* — ошибка: " + reportfmt.Escape(fatSecretErr.Error())
 	} else {
 		output += "\n\n" + fatSecretReport
@@ -224,9 +222,8 @@ func (b *Bot) handleNutrition(c tele.Context) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	report, err := b.deps.FatSecret.Execute(ctx, fatsecret.Yesterday(time.Now(), b.deps.Location))
+	report, err := b.executeFatSecret(ctx, fatsecret.Yesterday(time.Now(), b.deps.Location))
 	if err != nil {
-		b.deps.Logger.Warn("fatsecret daily report", "err", err)
 		return b.reply(c, "Не удалось получить данные FatSecret: "+reportfmt.Escape(err.Error()))
 	}
 	return b.reply(c, report)
@@ -250,14 +247,47 @@ func (b *Bot) handleHealthSummary(c tele.Context) error {
 		output = whoopReport
 	}
 
-	fatSecretReport, fatSecretErr := b.deps.FatSecret.Execute(ctx, fatsecret.LastCompletedDays(now, b.deps.Location, 30))
+	fatSecretReport, fatSecretErr := b.executeFatSecret(ctx, fatsecret.LastCompletedDays(now, b.deps.Location, 30))
 	if fatSecretErr != nil {
-		b.deps.Logger.Warn("fatsecret monthly report", "err", fatSecretErr)
 		output += "\n\n🥑 *FatSecret* — ошибка: " + reportfmt.Escape(fatSecretErr.Error())
 	} else {
 		output += "\n\n" + fatSecretReport
 	}
 	return b.reply(c, output)
+}
+
+func (b *Bot) executeFatSecret(ctx context.Context, req fatsecret.ReportRequest) (string, error) {
+	started := time.Now()
+	attrs := []any{
+		"mode", fatSecretMode(req.Mode),
+		"from", req.From.Format("2006-01-02"),
+		"to_exclusive", req.To.Format("2006-01-02"),
+	}
+	b.deps.Logger.Info("fatsecret request started", attrs...)
+
+	report, err := b.deps.FatSecret.Execute(ctx, req)
+	attrs = append(attrs, "duration", time.Since(started))
+	if err != nil {
+		attrs = append(attrs, "err", err)
+		b.deps.Logger.Warn("fatsecret request failed", attrs...)
+		return "", err
+	}
+
+	b.deps.Logger.Info("fatsecret request completed", attrs...)
+	return report, nil
+}
+
+func fatSecretMode(mode fatsecret.ReportMode) string {
+	switch mode {
+	case fatsecret.DailyReport:
+		return "daily"
+	case fatsecret.SummaryReport:
+		return "summary"
+	case fatsecret.AnalysisReport:
+		return "analysis"
+	default:
+		return "unknown"
+	}
 }
 
 func (b *Bot) sendWhoopConnect(c tele.Context) error {
