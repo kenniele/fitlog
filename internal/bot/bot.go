@@ -29,6 +29,10 @@ type StateIssuer interface {
 	Issue(chatID int64) (string, error)
 }
 
+type FatSecretAuthorizer interface {
+	Begin(ctx context.Context, chatID int64) (string, error)
+}
+
 type Deps struct {
 	Whoop         whoop.ReportUseCase
 	FatSecret     fatsecret.ReportUseCase
@@ -36,6 +40,7 @@ type Deps struct {
 	PublicBaseURL string
 	OAuthConfig   *oauth2.Config
 	States        StateIssuer
+	FatSecretAuth FatSecretAuthorizer
 	Location      *time.Location
 	Logger        *slog.Logger
 }
@@ -94,6 +99,7 @@ func botCommands() []tele.Command {
 		{Text: "health_summary", Description: "Саммари здоровья и питания за 30 дней"},
 		{Text: "nutrition_analysis", Description: "Анализ дефицита за последние 14 дней"},
 		{Text: "info", Description: "Здоровье и питание за выбранную дату"},
+		{Text: "connect_fatsecret", Description: "Подключить аккаунт FatSecret"},
 	}
 }
 
@@ -104,6 +110,7 @@ func (b *Bot) registerHandlers() {
 	b.b.Handle("/health_summary", b.handleHealthSummary)
 	b.b.Handle("/nutrition_analysis", b.handleNutritionAnalysis)
 	b.b.Handle("/info", b.handleInfo)
+	b.b.Handle("/connect_fatsecret", b.sendFatSecretConnect)
 	// Unknown text, including Telegram's conventional /start, only opens the
 	// three-button menu and does not create another bot command.
 	b.b.Handle(tele.OnText, b.handleMenu)
@@ -114,6 +121,9 @@ func (b *Bot) handleNutritionAnalysis(c tele.Context) error {
 	defer cancel()
 	report, err := b.executeFatSecret(ctx, fatsecret.NutritionAnalysis(time.Now(), b.deps.Location))
 	if err != nil {
+		if errors.Is(err, fatsecret.ErrNotConnected) {
+			return b.sendFatSecretConnect(c)
+		}
 		return b.reply(c, "Не удалось рассчитать дефицит: "+reportfmt.Escape(err.Error()))
 	}
 	return b.reply(c, report)
@@ -141,6 +151,18 @@ func (b *Bot) NotifyOAuthSuccess(_ context.Context, chatID int64) {
 func (b *Bot) NotifyOAuthFailure(_ context.Context, chatID int64, reason string) {
 	if _, err := b.b.Send(&tele.Chat{ID: chatID}, "✗ "+reason, b.menu); err != nil {
 		b.deps.Logger.Warn("notify oauth failure", "err", err)
+	}
+}
+
+func (b *Bot) NotifyFatSecretOAuthSuccess(_ context.Context, chatID int64) {
+	if _, err := b.b.Send(&tele.Chat{ID: chatID}, "✓ FatSecret подключён. Нажми «Питание 🥑».", b.menu); err != nil {
+		b.deps.Logger.Warn("notify fatsecret oauth success", "err", err)
+	}
+}
+
+func (b *Bot) NotifyFatSecretOAuthFailure(_ context.Context, chatID int64, reason string) {
+	if _, err := b.b.Send(&tele.Chat{ID: chatID}, "✗ "+reason, b.menu); err != nil {
+		b.deps.Logger.Warn("notify fatsecret oauth failure", "err", err)
 	}
 }
 
@@ -224,6 +246,9 @@ func (b *Bot) handleNutrition(c tele.Context) error {
 
 	report, err := b.executeFatSecret(ctx, fatsecret.Yesterday(time.Now(), b.deps.Location))
 	if err != nil {
+		if errors.Is(err, fatsecret.ErrNotConnected) {
+			return b.sendFatSecretConnect(c)
+		}
 		return b.reply(c, "Не удалось получить данные FatSecret: "+reportfmt.Escape(err.Error()))
 	}
 	return b.reply(c, report)
@@ -265,7 +290,7 @@ func (b *Bot) executeFatSecret(ctx context.Context, req fatsecret.ReportRequest)
 	}
 	b.deps.Logger.Info("fatsecret request started", attrs...)
 
-	report, err := b.deps.FatSecret.Execute(ctx, req)
+	fetched, err := b.deps.FatSecret.Fetch(ctx, req)
 	attrs = append(attrs, "duration", time.Since(started))
 	if err != nil {
 		attrs = append(attrs, "err", err)
@@ -273,8 +298,15 @@ func (b *Bot) executeFatSecret(ctx context.Context, req fatsecret.ReportRequest)
 		return "", err
 	}
 
+	transformed := b.deps.FatSecret.Transform(fetched)
+	attrs = append(attrs,
+		"entries_received", len(fetched.Entries),
+		"days_received", len(fetched.Days),
+		"days_in_period", transformed.LoggedDays,
+		"calories", transformed.Calories,
+	)
 	b.deps.Logger.Info("fatsecret request completed", attrs...)
-	return report, nil
+	return b.deps.FatSecret.Format(transformed), nil
 }
 
 func fatSecretMode(mode fatsecret.ReportMode) string {
@@ -288,6 +320,23 @@ func fatSecretMode(mode fatsecret.ReportMode) string {
 	default:
 		return "unknown"
 	}
+}
+
+func (b *Bot) sendFatSecretConnect(c tele.Context) error {
+	if b.deps.FatSecretAuth == nil {
+		return b.reply(c, "FatSecret не подключён\\.")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	link, err := b.deps.FatSecretAuth.Begin(ctx, c.Chat().ID)
+	if err != nil {
+		b.deps.Logger.Error("begin fatsecret oauth", "err", err)
+		return b.reply(c, "Не удалось начать подключение FatSecret\\.")
+	}
+	markup := &tele.ReplyMarkup{}
+	button := markup.URL("Подключить FatSecret", link)
+	markup.Inline(markup.Row(button))
+	return c.Send("FatSecret ещё не подключён\\.", markup)
 }
 
 func (b *Bot) sendWhoopConnect(c tele.Context) error {

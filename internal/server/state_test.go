@@ -19,11 +19,11 @@ func TestHealthzChecksDatabase(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 
 	ok := httptest.NewRecorder()
-	Router(nil, healthChecker{}, nil).ServeHTTP(ok, request)
+	Router(nil, nil, healthChecker{}, nil).ServeHTTP(ok, request)
 	require.Equal(t, http.StatusOK, ok.Code)
 
 	unavailable := httptest.NewRecorder()
-	Router(nil, healthChecker{err: errors.New("down")}, nil).ServeHTTP(unavailable, request)
+	Router(nil, nil, healthChecker{err: errors.New("down")}, nil).ServeHTTP(unavailable, request)
 	require.Equal(t, http.StatusServiceUnavailable, unavailable.Code)
 }
 
@@ -35,7 +35,7 @@ func TestRouterMountsArticles(t *testing.T) {
 	})
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/articles/article-id", nil)
-	Router(nil, healthChecker{}, articles).ServeHTTP(response, request)
+	Router(nil, nil, healthChecker{}, articles).ServeHTTP(response, request)
 	require.Equal(t, http.StatusOK, response.Code)
 	require.Equal(t, "/article-id", gotPath)
 }

@@ -11,7 +11,8 @@ import (
 type Source string
 
 const (
-	SourceWhoop Source = "whoop"
+	SourceWhoop     Source = "whoop"
+	SourceFatSecret Source = "fatsecret"
 )
 
 // Token is the plaintext form of a stored OAuth token set.

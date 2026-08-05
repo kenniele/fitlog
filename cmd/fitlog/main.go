@@ -90,16 +90,16 @@ func run(parent context.Context) error {
 	oauthCfg := whoop.NewOAuthConfig(cfg.WhoopClientID, cfg.WhoopClientSecret, cfg.WhoopRedirectURI, nil)
 
 	// FatSecret
-	fsClient := fatsecret.NewClient(
-		fatsecret.NewSigner(cfg.FatSecretConsumerKey, cfg.FatSecretConsumerSecret,
-			cfg.FatSecretAccessToken, cfg.FatSecretAccessSecret),
-		fatsecret.Options{},
-	)
-	fsReports := fatsecret.NewUseCase(fsClient, loc, fatsecret.ReportOptions{EstimatedTDEE: cfg.NutritionEstimatedTDEE})
+	fsProvider := fatsecret.NewTokenProvider(tokenStore, cfg.FatSecretConsumerKey, cfg.FatSecretConsumerSecret,
+		cfg.FatSecretAccessToken, cfg.FatSecretAccessSecret)
+	fsReports := fatsecret.NewUseCase(fsProvider, loc, fatsecret.ReportOptions{EstimatedTDEE: cfg.NutritionEstimatedTDEE})
 	articleReports := obsidian.NewUseCase(cfg.ObsidianArticlesPath, articleCipher)
 
 	// OAuth state store
 	states := server.NewStateStore()
+	fsOAuthClient := fatsecret.NewOAuthClient(cfg.FatSecretConsumerKey, cfg.FatSecretConsumerSecret,
+		publicBaseURL+"/oauth/fatsecret/callback", nil)
+	fsOAuth := server.NewFatSecretOAuth(fsOAuthClient, tokenStore, logger)
 
 	// Bot
 	allowlist := bot.NewAllowlist(cfg.TelegramAllowedUserIDs, logger)
@@ -112,6 +112,7 @@ func run(parent context.Context) error {
 		PublicBaseURL: publicBaseURL,
 		OAuthConfig:   oauthCfg,
 		States:        states,
+		FatSecretAuth: fsOAuth,
 		Location:      loc,
 		Logger:        logger,
 	}
@@ -119,13 +120,14 @@ func run(parent context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bot: %w", err)
 	}
+	fsOAuth.SetNotifier(tb)
 
 	// HTTP server (OAuth callback + healthz). Bot doubles as Notifier.
 	cb := server.NewCallbackHandler(oauthCfg, states, tokenStore, tb, logger)
 	articleHandler := obsidian.NewHandler(articleReports, logger)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           server.Router(cb, pool, articleHandler),
+		Handler:           server.Router(cb, fsOAuth, pool, articleHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

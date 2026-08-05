@@ -22,8 +22,8 @@ type Config struct {
 
 	FatSecretConsumerKey    string  `env:"FATSECRET_CONSUMER_KEY,required"`
 	FatSecretConsumerSecret string  `env:"FATSECRET_CONSUMER_SECRET,required"`
-	FatSecretAccessToken    string  `env:"FATSECRET_ACCESS_TOKEN,required"`
-	FatSecretAccessSecret   string  `env:"FATSECRET_ACCESS_SECRET,required"`
+	FatSecretAccessToken    string  `env:"FATSECRET_ACCESS_TOKEN"`
+	FatSecretAccessSecret   string  `env:"FATSECRET_ACCESS_SECRET"`
 	NutritionEstimatedTDEE  float64 `env:"NUTRITION_ESTIMATED_TDEE"`
 
 	TelegramBotToken       string  `env:"TELEGRAM_BOT_TOKEN,required"`

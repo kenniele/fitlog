@@ -80,6 +80,8 @@ func (s *StateStore) gcLocked() {
 type Notifier interface {
 	NotifyOAuthSuccess(ctx context.Context, chatID int64)
 	NotifyOAuthFailure(ctx context.Context, chatID int64, reason string)
+	NotifyFatSecretOAuthSuccess(ctx context.Context, chatID int64)
+	NotifyFatSecretOAuthFailure(ctx context.Context, chatID int64, reason string)
 }
 
 // HealthChecker verifies the application's required persistence dependency.
@@ -104,7 +106,7 @@ func NewCallbackHandler(cfg *oauth2.Config, states *StateStore, tokens *auth.Tok
 }
 
 // Router builds an http.Handler exposing health, OAuth, and public article pages.
-func Router(h *CallbackHandler, database HealthChecker, articles http.Handler) http.Handler {
+func Router(h *CallbackHandler, fatSecret *FatSecretOAuth, database HealthChecker, articles http.Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/healthz", func(w http.ResponseWriter, request *http.Request) {
 		ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
@@ -118,8 +120,13 @@ func Router(h *CallbackHandler, database HealthChecker, articles http.Handler) h
 	})
 	// Both paths are wired so the registered redirect URI can be either the
 	// short /callback or the namespaced /oauth/whoop/callback.
-	r.Get("/oauth/whoop/callback", h.HandleWhoopCallback)
-	r.Get("/callback", h.HandleWhoopCallback)
+	if h != nil {
+		r.Get("/oauth/whoop/callback", h.HandleWhoopCallback)
+		r.Get("/callback", h.HandleWhoopCallback)
+	}
+	if fatSecret != nil {
+		r.Get("/oauth/fatsecret/callback", fatSecret.HandleCallback)
+	}
 	if articles != nil {
 		r.Mount("/articles", http.StripPrefix("/articles", articles))
 	}

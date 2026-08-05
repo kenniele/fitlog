@@ -21,22 +21,22 @@ make migrate-up
 make run    # or: docker compose logs -f app
 ```
 
-In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀**; when Whoop is not connected yet, the bot responds with an OAuth authorization button. FatSecret tokens are read from `.env` directly.
+In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀** or **Питание 🥑**; when the provider is not connected yet, the bot responds with an OAuth authorization button. Both providers' delegated tokens are encrypted in PostgreSQL.
 
 ## Configuration
 
 | Variable                       | Required | Notes                                                                |
 | ------------------------------ | -------- | -------------------------------------------------------------------- |
 | `DATABASE_URL`                 | yes      | `postgres://user:pass@host:5432/db?sslmode=disable`                  |
-| `FITLOG_TOKEN_ENCRYPTION_KEY`  | yes      | Base64-encoded 32-byte key for AES-GCM (Whoop tokens at rest)        |
+| `FITLOG_TOKEN_ENCRYPTION_KEY`  | yes      | Base64-encoded 32-byte key for AES-GCM OAuth tokens at rest          |
 | `WHOOP_CLIENT_ID` / `_SECRET`  | yes      | From Whoop developer console                                         |
 | `WHOOP_REDIRECT_URI`           | yes      | Must match the registered callback (`/oauth/whoop/callback`)         |
 | `FATSECRET_CONSUMER_KEY/SECRET`| yes      | OAuth 1.0 app credentials                                            |
-| `FATSECRET_ACCESS_TOKEN/SECRET`| yes      | OAuth 1.0 user access tokens (never expire)                          |
+| `FATSECRET_ACCESS_TOKEN/SECRET`| no       | Legacy fallback; leave blank to connect through Telegram            |
 | `NUTRITION_ESTIMATED_TDEE`     | no       | Maintenance kcal/day used by the 14-day deficit analysis             |
 | `TELEGRAM_BOT_TOKEN`           | yes      | From @BotFather                                                      |
 | `TELEGRAM_ALLOWED_USER_IDS`    | yes      | Comma-separated int64 Telegram user IDs                              |
-| `HTTP_ADDR`                    | no       | Default `:8080`. Serves Whoop OAuth callback + DB-aware `/healthz`.  |
+| `HTTP_ADDR`                    | no       | Default `:8080`. Serves OAuth callbacks + DB-aware `/healthz`.       |
 | `TZ_LOCATION`                  | no       | Default `Europe/Moscow`. Used for "today"/"yesterday" boundaries.    |
 | `LOG_LEVEL`                    | no       | `debug` / `info` / `warn` / `error`. Default `info`.                 |
 | `OBSIDIAN_ARTICLES_PATH`       | no       | Folder containing publishable `.md` files; read recursively          |
@@ -52,6 +52,7 @@ In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀*
 | `/health_summary` | Whoop and FatSecret summary for the previous 30 completed days |
 | `/nutrition_analysis` | Average intake, deficit, protein, and calculated weekly weight change for 14 completed days |
 | `/info YYYY-MM-DD` | Whoop and FatSecret report for a selected calendar day |
+| `/connect_fatsecret` | Authorize or replace the connected FatSecret account |
 
 The provider modules expose the same application pipeline: `Fetch → Transform → Format`. Telegram handlers only select a request and deliver the formatted result.
 
@@ -75,6 +76,7 @@ Article URLs contain an opaque AES-GCM token with a fresh random nonce and a pro
 - **Whoop `invalid_client`** — client credentials must go in the request body, not the `Authorization` header. The code uses `oauth2.AuthStyleInParams`; do not change this.
 - **Whoop refresh token rotates on every refresh.** It is persisted by `OAuthProvider` → `persistingTokenSource` → `oauth_tokens`. If you copy a refresh token by hand, the next refresh invalidates the old one.
 - **FatSecret 401 / signature errors** — all OAuth params must be sent in the form body (not header, not query), and base-string encoding must use full RFC 3986 percent-encoding (`%20` for space, etc.), not `url.QueryEscape`.
+- **FatSecret credentials changed or became invalid** — use `/connect_fatsecret`; a successful authorization stored in DB overrides the optional legacy credentials.
 - **FatSecret region-locked** — the platform endpoint blocks requests from some regions; you may need a VPN on the host running the bot.
 - **`dghubble/oauth1` does not work with FatSecret.** Don't reintroduce it.
 
