@@ -21,6 +21,7 @@ import (
 	"fitlog/internal/obsidian"
 	"fitlog/internal/server"
 	"fitlog/internal/storage"
+	"fitlog/internal/training"
 	"fitlog/internal/whoop"
 )
 
@@ -105,16 +106,19 @@ func run(parent context.Context) error {
 	allowlist := bot.NewAllowlist(cfg.TelegramAllowedUserIDs, logger)
 	whoopProvider := whoop.NewOAuthProvider(tokenStore, oauthCfg, logger)
 	whoopReports := whoop.NewUseCase(whoopProvider, loc)
+	trainingReports := training.NewUseCase(storage.NewTrainingRepo(pool))
 	deps := bot.Deps{
-		Whoop:         whoopReports,
-		FatSecret:     fsReports,
-		Articles:      articleReports,
-		PublicBaseURL: publicBaseURL,
-		OAuthConfig:   oauthCfg,
-		States:        states,
-		FatSecretAuth: fsOAuth,
-		Location:      loc,
-		Logger:        logger,
+		Whoop:            whoopReports,
+		FatSecret:        fsReports,
+		Articles:         articleReports,
+		PublicBaseURL:    publicBaseURL,
+		OAuthConfig:      oauthCfg,
+		States:           states,
+		FatSecretAuth:    fsOAuth,
+		Training:         trainingReports,
+		WorkoutChannelID: cfg.TelegramWorkoutChannelID,
+		Location:         loc,
+		Logger:           logger,
 	}
 	tb, err := bot.New(cfg.TelegramBotToken, allowlist, deps) //nolint:contextcheck // telebot HandlerFunc has no inheritable context.Context; handlers create their own.
 	if err != nil {

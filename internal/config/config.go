@@ -26,8 +26,9 @@ type Config struct {
 	FatSecretAccessSecret   string  `env:"FATSECRET_ACCESS_SECRET"`
 	NutritionEstimatedTDEE  float64 `env:"NUTRITION_ESTIMATED_TDEE"`
 
-	TelegramBotToken       string  `env:"TELEGRAM_BOT_TOKEN,required"`
-	TelegramAllowedUserIDs []int64 `env:"TELEGRAM_ALLOWED_USER_IDS,required" envSeparator:","`
+	TelegramBotToken         string  `env:"TELEGRAM_BOT_TOKEN,required"`
+	TelegramAllowedUserIDs   []int64 `env:"TELEGRAM_ALLOWED_USER_IDS,required" envSeparator:","`
+	TelegramWorkoutChannelID int64   `env:"TELEGRAM_WORKOUT_CHANNEL_ID"`
 
 	LogLevel   string `env:"LOG_LEVEL" envDefault:"info"`
 	HTTPAddr   string `env:"HTTP_ADDR" envDefault:":8080"`

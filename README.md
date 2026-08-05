@@ -1,6 +1,6 @@
 # fitlog
 
-Personal Telegram assistant that pulls fitness data from **Whoop**, nutrition data from **FatSecret**, and publishes a random Markdown article from an **Obsidian** folder. The normal UI is a persistent three-button keyboard; slash commands provide a dated health report and a 30-day summary. Access to the bot is restricted by Telegram ID. There are no schedulers or background API polls.
+Personal Telegram assistant that pulls fitness data from **Whoop**, nutrition data from **FatSecret**, logs strength workouts, and publishes a random Markdown article from an **Obsidian** folder. The normal UI is a persistent four-button keyboard; slash commands provide a dated health report and a 30-day summary. Access to the bot is restricted by Telegram ID. There are no schedulers or background API polls.
 
 ## Stack
 
@@ -36,6 +36,7 @@ In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀*
 | `NUTRITION_ESTIMATED_TDEE`     | no       | Maintenance kcal/day used by the 14-day deficit analysis             |
 | `TELEGRAM_BOT_TOKEN`           | yes      | From @BotFather                                                      |
 | `TELEGRAM_ALLOWED_USER_IDS`    | yes      | Comma-separated int64 Telegram user IDs                              |
+| `TELEGRAM_WORKOUT_CHANNEL_ID`  | no       | Channel ID for completed workouts; bot needs permission to post      |
 | `HTTP_ADDR`                    | no       | Default `:8080`. Serves OAuth callbacks + DB-aware `/healthz`.       |
 | `TZ_LOCATION`                  | no       | Default `Europe/Moscow`. Used for "today"/"yesterday" boundaries.    |
 | `LOG_LEVEL`                    | no       | `debug` / `info` / `warn` / `error`. Default `info`.                 |
@@ -49,12 +50,47 @@ In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀*
 | `Здоровье🫀` | Yesterday's completed Whoop sleep, recovery, strain, and workouts |
 | `Питание 🥑` | Yesterday's completed FatSecret meal groups and macros |
 | `Статья 📖` | A random Obsidian article as a styled HTML page |
+| `Тренировка 🏋️` | One-message workout card, program import, and workout history |
 | `/health_summary` | Whoop and FatSecret summary for the previous 30 completed days |
 | `/nutrition_analysis` | Average intake, deficit, protein, and calculated weekly weight change for 14 completed days |
 | `/info YYYY-MM-DD` | Whoop and FatSecret report for a selected calendar day |
 | `/connect_fatsecret` | Authorize or replace the connected FatSecret account |
 
 The provider modules expose the same application pipeline: `Fetch → Transform → Format`. Telegram handlers only select a request and deliver the formatted result.
+
+## Strength workouts
+
+Press **Тренировка 🏋️** to open a single control message. Inline buttons edit that message in place instead of sending a new card after every action. When the card asks for a set, send one of these forms:
+
+```text
+12Р 40КГ
+12Р -
+```
+
+The first form records external weight; the dash records bodyweight. Letter case, decimal comma/dot, and the common hyphen/dash characters are normalized. The temporary input message is deleted after it is processed. Each exercise has **Подход**, **Конец упражнения**, and **Заметка** actions. Active state and the control-message ID are stored in PostgreSQL, so a workout can resume after an app restart.
+
+Programs can be imported from a UTF-8 TXT file. A blank line separates programs, the first line of each block is the program name, and the remaining lines are ordered exercises:
+
+```text
+Понедельник
+Тяга вертикального блока
+Жим гантелей лёжа
+
+Вторник
+Подтягивания
+Отжимания
+```
+
+CSV imports accept comma or semicolon delimiters and optional English or Russian headers:
+
+```csv
+program,exercise
+Понедельник,Тяга вертикального блока
+Понедельник,Жим гантелей лёжа
+Вторник,Подтягивания
+```
+
+The bot shows a preview before saving. An imported program replaces an existing program with the same name; programs absent from the file remain untouched. Running sessions hold an exercise-name snapshot, so replacing a program never rewrites workout history. If `TELEGRAM_WORKOUT_CHANNEL_ID` is configured, the final card can publish the formatted result to that channel.
 
 ## Obsidian articles
 
@@ -84,7 +120,8 @@ Article URLs contain an opaque AES-GCM token with a fresh random nonce and a pro
 
 ```
 cmd/fitlog/             entrypoint
-internal/domain/        plain DTOs (Sleep, Recovery, Cycle, Workout, MealEntry, ...)
+internal/domain/        provider DTOs (Sleep, Recovery, Cycle, Workout, MealEntry, ...)
+internal/training/      manual workout parsing, state, use case, and formatting
 internal/whoop/         OAuth2 + REST client + Fetch/Transform/Format reports
 internal/fatsecret/     OAuth1 signer + REST client + Fetch/Transform/Format reports
 internal/obsidian/      read-only vault scanner + Markdown-to-HTML article publisher

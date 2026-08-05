@@ -14,6 +14,7 @@ import (
 	"fitlog/internal/fatsecret"
 	"fitlog/internal/obsidian"
 	"fitlog/internal/reportfmt"
+	"fitlog/internal/training"
 	"fitlog/internal/whoop"
 )
 
@@ -21,6 +22,7 @@ const (
 	HealthButton    = "Здоровье🫀"
 	NutritionButton = "Питание 🥑"
 	ArticleButton   = "Статья 📖"
+	TrainingButton  = "Тренировка 🏋️"
 )
 
 // StateIssuer is the small OAuth-state capability required by the delivery
@@ -34,15 +36,17 @@ type FatSecretAuthorizer interface {
 }
 
 type Deps struct {
-	Whoop         whoop.ReportUseCase
-	FatSecret     fatsecret.ReportUseCase
-	Articles      obsidian.ReportUseCase
-	PublicBaseURL string
-	OAuthConfig   *oauth2.Config
-	States        StateIssuer
-	FatSecretAuth FatSecretAuthorizer
-	Location      *time.Location
-	Logger        *slog.Logger
+	Whoop            whoop.ReportUseCase
+	FatSecret        fatsecret.ReportUseCase
+	Articles         obsidian.ReportUseCase
+	PublicBaseURL    string
+	OAuthConfig      *oauth2.Config
+	States           StateIssuer
+	FatSecretAuth    FatSecretAuthorizer
+	Training         *training.UseCase
+	WorkoutChannelID int64
+	Location         *time.Location
+	Logger           *slog.Logger
 }
 
 // Bot is deliberately a thin delivery adapter. Fetching, transformation, and
@@ -89,7 +93,7 @@ func mainMenu() *tele.ReplyMarkup {
 	menu := &tele.ReplyMarkup{ResizeKeyboard: true, IsPersistent: true, Placeholder: "Выбери раздел"}
 	menu.Reply(
 		menu.Row(menu.Text(HealthButton), menu.Text(NutritionButton)),
-		menu.Row(menu.Text(ArticleButton)),
+		menu.Row(menu.Text(ArticleButton), menu.Text(TrainingButton)),
 	)
 	return menu
 }
@@ -107,13 +111,16 @@ func (b *Bot) registerHandlers() {
 	b.b.Handle(HealthButton, b.handleHealth)
 	b.b.Handle(NutritionButton, b.handleNutrition)
 	b.b.Handle(ArticleButton, b.handleArticle)
+	b.b.Handle(TrainingButton, b.handleTrainingButton)
 	b.b.Handle("/health_summary", b.handleHealthSummary)
 	b.b.Handle("/nutrition_analysis", b.handleNutritionAnalysis)
 	b.b.Handle("/info", b.handleInfo)
 	b.b.Handle("/connect_fatsecret", b.sendFatSecretConnect)
+	b.registerTrainingHandlers()
 	// Unknown text, including Telegram's conventional /start, only opens the
-	// three-button menu and does not create another bot command.
-	b.b.Handle(tele.OnText, b.handleMenu)
+	// persistent menu and does not create another bot command.
+	b.b.Handle(tele.OnText, b.handleText)
+	b.b.Handle(tele.OnDocument, b.handleTrainingDocument)
 }
 
 func (b *Bot) handleNutritionAnalysis(c tele.Context) error {
