@@ -81,6 +81,10 @@ jobs:
           git reset --hard origin/main
           COMPOSE="docker compose -f deployments/docker-compose.yml -f deployments/docker-compose.prod.yml"
           $COMPOSE pull
+          # The image embeds the SQL migrations. Apply them before starting the
+          # new application version so code never runs against an old schema.
+          $COMPOSE up -d --wait --wait-timeout 30 postgres
+          $COMPOSE run --rm --no-deps app migrate
           docker compose \
             --env-file /home/fitlog/fitlog/.env \
             -f deployments/docker-compose.yml \

@@ -23,6 +23,7 @@ import (
 	"fitlog/internal/storage"
 	"fitlog/internal/training"
 	"fitlog/internal/whoop"
+	"fitlog/migrations"
 )
 
 func main() {
@@ -30,11 +31,28 @@ func main() {
 		Use:   "fitlog",
 		Short: "Personal Telegram assistant for health, nutrition, and reading",
 	}
-	root.AddCommand(serverCmd())
+	root.AddCommand(serverCmd(), migrateCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+func migrateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "migrate",
+		Short: "Apply pending database migrations",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			databaseURL := os.Getenv("DATABASE_URL")
+			if databaseURL == "" {
+				return errors.New("DATABASE_URL is required")
+			}
+			if err := migrations.Up(cmd.Context(), databaseURL); err != nil {
+				return fmt.Errorf("migrate: %w", err)
+			}
+			return nil
+		},
 	}
 }
 
