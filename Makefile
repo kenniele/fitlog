@@ -34,7 +34,7 @@ tidy: ## go mod tidy
 	go mod tidy
 
 migrate-up: ## Apply migrations
-	go run github.com/pressly/goose/v3/cmd/goose@latest -dir $(MIGRATIONS_DIR) postgres "$(DATABASE_URL)" up
+	CGO_ENABLED=0 go run ./cmd/fitlog migrate
 
 migrate-down: ## Roll back one migration
 	go run github.com/pressly/goose/v3/cmd/goose@latest -dir $(MIGRATIONS_DIR) postgres "$(DATABASE_URL)" down
