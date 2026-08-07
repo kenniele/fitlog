@@ -84,7 +84,9 @@ jobs:
           # The image embeds the SQL migrations. Apply them before starting the
           # new application version so code never runs against an old schema.
           $COMPOSE up -d --wait --wait-timeout 30 postgres
-          $COMPOSE run --rm --no-deps app migrate
+          # Do not let the one-off container consume the remaining SSH heredoc.
+          # Without closed stdin, bash reaches EOF here and never recreates app.
+          $COMPOSE run --rm --no-deps -T app migrate </dev/null
           docker compose \
             --env-file /home/fitlog/fitlog/.env \
             -f deployments/docker-compose.yml \
