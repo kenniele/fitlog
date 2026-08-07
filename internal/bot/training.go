@@ -56,13 +56,17 @@ func (b *Bot) handleTrainingButton(c tele.Context) error {
 	if b.deps.Training == nil {
 		return c.Send("Тренировки пока не настроены.", b.menu)
 	}
-	b.deleteIncoming(c)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	ownerID := c.Sender().ID
-	if err := b.deps.Training.ClearInput(ctx, ownerID); err != nil {
+	chat := c.Chat()
+	if chat == nil {
+		return fmt.Errorf("training card has no chat")
+	}
+	if err := b.deps.Training.OpenControlMessage(ctx, ownerID, chat.ID); err != nil {
 		return b.showTrainingFailure(ctx, c, ownerID, err)
 	}
+	b.deleteIncoming(c)
 	if session, err := b.deps.Training.Active(ctx, ownerID); err == nil {
 		return b.showActiveTraining(ctx, c, session, "")
 	} else if !errors.Is(err, training.ErrNoActiveSession) {

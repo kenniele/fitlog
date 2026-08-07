@@ -38,6 +38,21 @@ func (u *UseCase) SaveControlMessage(ctx context.Context, ownerID, chatID int64,
 	return u.repo.SaveUIState(ctx, state)
 }
 
+// OpenControlMessage starts a fresh workout card in the current chat. The old
+// message ID is forgotten so opening the section from the persistent reply
+// keyboard cannot silently edit a card that is far above in the conversation.
+func (u *UseCase) OpenControlMessage(ctx context.Context, ownerID, chatID int64) error {
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return err
+	}
+	state.ChatID = chatID
+	state.MessageID = 0
+	state.Mode = InputNone
+	state.PendingImport = nil
+	return u.repo.SaveUIState(ctx, state)
+}
+
 func (u *UseCase) Expect(ctx context.Context, ownerID int64, mode InputMode) error {
 	state, err := u.State(ctx, ownerID)
 	if err != nil {
