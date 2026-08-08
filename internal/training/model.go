@@ -15,7 +15,6 @@ var (
 	ErrActiveSession   = errors.New("an active training session already exists")
 	ErrNoActiveSession = errors.New("no active training session")
 	ErrNoPendingImport = errors.New("no pending program import")
-	ErrPublished       = errors.New("published training cannot be edited")
 	ErrNotEditable     = errors.New("exercise cannot be edited yet")
 )
 

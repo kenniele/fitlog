@@ -1,11 +1,18 @@
 package bot
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	tele "gopkg.in/telebot.v3"
+
+	"fitlog/internal/training"
 )
 
 func TestTrainingPairRoundTrip(t *testing.T) {
@@ -37,4 +44,53 @@ func TestTruncateTrainingButtonKeepsUnicodeBoundaries(t *testing.T) {
 func TestIsMessageAlreadyDeleted(t *testing.T) {
 	require.True(t, isMessageAlreadyDeleted(errors.New("Bad Request: message to delete not found")))
 	require.False(t, isMessageAlreadyDeleted(errors.New("Bad Request: message can't be deleted")))
+}
+
+func TestUpdatePublishedTrainingEditsExistingChannelPost(t *testing.T) {
+	var payload map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/bottest/editMessageText", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		_, err := w.Write([]byte(`{"ok":true,"result":{"message_id":456,"date":1,"chat":{"id":-100123,"type":"channel"}}}`))
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	telegram, err := tele.NewBot(tele.Settings{
+		URL: server.URL, Token: "test", Offline: true, Client: server.Client(),
+	})
+	require.NoError(t, err)
+	chatID := int64(-100123)
+	messageID := 456
+	weight := 47.5
+	session := training.Session{
+		ID: 1, OwnerID: 42, ProgramName: "Фуллбади C", Status: "finished",
+		StartedAt:       time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC),
+		PublishedChatID: &chatID, PublishedMessageID: &messageID,
+		Exercises: []training.SessionExercise{{
+			ID: 2, Position: 1, Name: "Тяга", Complete: true,
+			Sets: []training.WorkoutSet{{ID: 3, Position: 1, Reps: 8, WeightKG: &weight}},
+		}},
+	}
+	b := &Bot{b: telegram, deps: Deps{Location: time.UTC}}
+
+	updated, err := b.updatePublishedTraining(session)
+
+	require.NoError(t, err)
+	require.True(t, updated)
+	require.Equal(t, "-100123", payload["chat_id"])
+	require.Equal(t, "456", payload["message_id"])
+	require.Contains(t, payload["text"], "8Р 47.5КГ")
+}
+
+func TestUpdatePublishedTrainingValidatesStoredMessage(t *testing.T) {
+	b := &Bot{}
+	updated, err := b.updatePublishedTraining(training.Session{})
+	require.NoError(t, err)
+	require.False(t, updated)
+
+	chatID := int64(-100123)
+	updated, err = b.updatePublishedTraining(training.Session{PublishedChatID: &chatID})
+	require.Error(t, err)
+	require.False(t, updated)
 }

@@ -315,23 +315,19 @@ func (r *TrainingRepo) ReopenExercise(
 
 	var status string
 	var currentPosition, position int
-	var complete, published bool
+	var complete bool
 	err = tx.QueryRow(ctx, `
-		SELECT s.status, s.current_position, s.published_message_id IS NOT NULL,
-		       e.position, e.complete
+		SELECT s.status, s.current_position, e.position, e.complete
 		FROM training_sessions s
 		JOIN training_session_exercises e ON e.session_id = s.id
 		WHERE s.id = $1 AND s.owner_id = $2 AND e.id = $3
 		FOR UPDATE OF s, e`, sessionID, ownerID, exerciseID,
-	).Scan(&status, &currentPosition, &published, &position, &complete)
+	).Scan(&status, &currentPosition, &position, &complete)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return training.Session{}, training.ErrNotFound
 	}
 	if err != nil {
 		return training.Session{}, fmt.Errorf("select exercise to reopen: %w", err)
-	}
-	if published {
-		return training.Session{}, training.ErrPublished
 	}
 	if status == "active" && !complete && position != currentPosition {
 		return training.Session{}, training.ErrNotEditable

@@ -91,7 +91,7 @@ program,exercise
 Вторник,Подтягивания
 ```
 
-The bot shows a preview before saving. An imported program replaces an existing program with the same name; programs absent from the file remain untouched. Running sessions hold an exercise-name snapshot, so replacing a program never rewrites workout history. Completed workouts remain clickable in history, so an unpublished workout can be reopened for correction or publication later. If `TELEGRAM_WORKOUT_CHANNEL_IDS` (or the legacy singular setting) is configured, **Publish** opens a channel picker and sends the formatted result to the selected destination. Telegram bots cannot enumerate all channels automatically, so each available channel must be present in configuration and the bot must be allowed to post there.
+The bot shows a preview before saving. An imported program replaces an existing program with the same name; programs absent from the file remain untouched. Running sessions hold an exercise-name snapshot, so replacing a program never rewrites workout history. Completed workouts remain clickable in history and can be reopened for correction. When an edited published workout is completed again, Fitlog updates the existing channel post instead of creating another one. If `TELEGRAM_WORKOUT_CHANNEL_IDS` (or the legacy singular setting) is configured, **Publish** opens a channel picker and sends the formatted result to the selected destination. Telegram bots cannot enumerate all channels automatically, so each available channel must be present in configuration and the bot must be allowed to post there.
 
 ## Obsidian articles
 

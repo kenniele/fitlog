@@ -218,6 +218,14 @@ func (b *Bot) handleTrainingFinishExercise(c tele.Context) error {
 	if session.Active() {
 		return b.showActiveTraining(ctx, c, session, "")
 	}
+	updated, updateErr := b.updatePublishedTraining(session)
+	if updateErr != nil {
+		b.deps.Logger.Error("update published training", "err", updateErr, "session_id", session.ID)
+		return b.showFinishedTraining(ctx, c, session, "Тренировка сохранена, но публикацию в канале обновить не удалось: "+updateErr.Error())
+	}
+	if updated {
+		return b.showFinishedTraining(ctx, c, session, "Публикация в канале обновлена.")
+	}
 	return b.showFinishedTraining(ctx, c, session, "")
 }
 
@@ -487,6 +495,28 @@ func (b *Bot) handleTrainingPublishChannel(c tele.Context) error {
 	return b.showFinishedTraining(ctx, c, session, "Опубликовано в «"+b.workoutChannelTitle(channelID)+"».")
 }
 
+func (b *Bot) updatePublishedTraining(session training.Session) (bool, error) {
+	if session.PublishedChatID == nil && session.PublishedMessageID == nil {
+		return false, nil
+	}
+	if session.PublishedChatID == nil || session.PublishedMessageID == nil {
+		return false, fmt.Errorf("неполная отметка о публикации")
+	}
+	stored := tele.StoredMessage{
+		ChatID:    *session.PublishedChatID,
+		MessageID: strconv.Itoa(*session.PublishedMessageID),
+	}
+	_, err := b.b.Edit(
+		stored,
+		training.FormatFinished(session, b.deps.Location),
+		&tele.SendOptions{ParseMode: tele.ModeHTML, DisableWebPagePreview: true},
+	)
+	if err != nil && !isMessageNotModified(err) {
+		return false, err
+	}
+	return true, nil
+}
+
 func (b *Bot) handleTrainingEdit(c tele.Context) error {
 	b.respond(c)
 	sessionID, err := parseTrainingID(c.Data())
@@ -540,8 +570,6 @@ func (b *Bot) handleTrainingReopen(c tele.Context) error {
 		switch {
 		case errors.Is(err, training.ErrActiveSession):
 			return b.showFinishedTraining(ctx, c, original, "Сначала закончи текущую активную тренировку.")
-		case errors.Is(err, training.ErrPublished):
-			return b.showFinishedTraining(ctx, c, original, "Опубликованную тренировку уже нельзя изменить.")
 		case errors.Is(err, training.ErrNotEditable):
 			return b.showTrainingExerciseEditor(ctx, c, original, "Это упражнение ещё не было завершено.")
 		}
@@ -711,9 +739,7 @@ func (b *Bot) showFinishedTraining(ctx context.Context, c tele.Context, session 
 	if len(b.deps.WorkoutChannelIDs) > 0 && session.PublishedMessageID == nil {
 		rows = append(rows, markup.Row(markup.Data("📣 Опубликовать", trainingCallbackPublish, strconv.FormatInt(session.ID, 10))))
 	}
-	if session.PublishedMessageID == nil {
-		rows = append(rows, markup.Row(markup.Data("✏️ Исправить упражнение", trainingCallbackEdit, strconv.FormatInt(session.ID, 10))))
-	}
+	rows = append(rows, markup.Row(markup.Data("✏️ Исправить упражнение", trainingCallbackEdit, strconv.FormatInt(session.ID, 10))))
 	rows = append(rows,
 		markup.Row(markup.Data("🗑 Удалить тренировку", trainingCallbackDelete, strconv.FormatInt(session.ID, 10))),
 		markup.Row(markup.Data("💾 Готово", trainingCallbackSaveOnly)),
@@ -802,9 +828,6 @@ func (b *Bot) showTrainingExerciseEditor(
 	session training.Session,
 	notice string,
 ) error {
-	if session.PublishedMessageID != nil {
-		return b.showFinishedTraining(ctx, c, session, "Опубликованную тренировку уже нельзя изменить.")
-	}
 	var text strings.Builder
 	text.WriteString("<b>✏️ Исправить упражнение</b>\n\n")
 	text.WriteString("Выбери упражнение. Оно снова станет текущим; сохранённые подходы и заметка останутся на месте.")
