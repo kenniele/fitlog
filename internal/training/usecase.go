@@ -199,3 +199,10 @@ func (u *UseCase) Recent(ctx context.Context, ownerID int64, limit int) ([]Sessi
 func (u *UseCase) MarkPublished(ctx context.Context, ownerID, sessionID, chatID int64, messageID int) error {
 	return u.repo.MarkPublished(ctx, ownerID, sessionID, chatID, messageID)
 }
+
+func (u *UseCase) DeleteSession(ctx context.Context, ownerID, sessionID int64) error {
+	if err := u.ClearInput(ctx, ownerID); err != nil {
+		return err
+	}
+	return u.repo.DeleteSession(ctx, ownerID, sessionID)
+}

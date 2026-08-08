@@ -35,6 +35,9 @@ const (
 	trainingCallbackEdit           = "training_edit"
 	trainingCallbackReopen         = "training_reopen"
 	trainingCallbackEditBack       = "training_edit_back"
+	trainingCallbackDelete         = "training_delete"
+	trainingCallbackConfirmDelete  = "training_delete_confirm"
+	trainingCallbackDeleteLocal    = "training_delete_local"
 	trainingCallbackSaveOnly       = "training_save_only"
 
 	maxTrainingImportBytes = 1 << 20
@@ -59,6 +62,9 @@ func (b *Bot) registerTrainingHandlers() {
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackEdit}, b.handleTrainingEdit, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackReopen}, b.handleTrainingReopen, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackEditBack}, b.handleTrainingEditBack, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackDelete}, b.handleTrainingDelete, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackConfirmDelete}, b.handleTrainingConfirmDelete, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackDeleteLocal}, b.handleTrainingDeleteLocal, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackSaveOnly}, b.handleTrainingSaveOnly, currentCard)
 }
 
@@ -543,6 +549,79 @@ func (b *Bot) handleTrainingReopen(c tele.Context) error {
 	return b.showTrainingFailure(ctx, c, ownerID, err)
 }
 
+func (b *Bot) handleTrainingDelete(c tele.Context) error {
+	b.respond(c)
+	sessionID, err := parseTrainingID(c.Data())
+	if err != nil {
+		return fmt.Errorf("invalid training delete callback %q: %w", c.Data(), err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	session, err := b.deps.Training.Session(ctx, ownerID, sessionID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showTrainingDeleteConfirmation(ctx, c, session, "")
+}
+
+func (b *Bot) handleTrainingConfirmDelete(c tele.Context) error {
+	b.respond(c)
+	sessionID, err := parseTrainingID(c.Data())
+	if err != nil {
+		return fmt.Errorf("invalid training delete confirmation %q: %w", c.Data(), err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	session, err := b.deps.Training.Session(ctx, ownerID, sessionID)
+	if errors.Is(err, training.ErrNotFound) {
+		return b.showTrainingHome(ctx, c, ownerID, "Тренировка уже удалена.")
+	}
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	if session.PublishedChatID != nil || session.PublishedMessageID != nil {
+		if session.PublishedChatID == nil || session.PublishedMessageID == nil {
+			return b.showTrainingDeleteFallback(ctx, c, session, "У тренировки повреждена отметка о публикации.")
+		}
+		stored := tele.StoredMessage{
+			ChatID:    *session.PublishedChatID,
+			MessageID: strconv.Itoa(*session.PublishedMessageID),
+		}
+		if err := b.b.Delete(stored); err != nil {
+			if !isMessageAlreadyDeleted(err) {
+				return b.showTrainingDeleteFallback(ctx, c, session, "Не удалось удалить публикацию из канала: "+err.Error())
+			}
+			b.deps.Logger.Warn("published training message already absent",
+				"err", err, "session_id", session.ID, "chat_id", *session.PublishedChatID,
+			)
+		}
+	}
+	if err := b.deps.Training.DeleteSession(ctx, ownerID, session.ID); err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showTrainingHome(ctx, c, ownerID, "Тренировка удалена.")
+}
+
+func (b *Bot) handleTrainingDeleteLocal(c tele.Context) error {
+	b.respond(c)
+	sessionID, err := parseTrainingID(c.Data())
+	if err != nil {
+		return fmt.Errorf("invalid local training delete confirmation %q: %w", c.Data(), err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	if err := b.deps.Training.DeleteSession(ctx, ownerID, sessionID); err != nil {
+		if errors.Is(err, training.ErrNotFound) {
+			return b.showTrainingHome(ctx, c, ownerID, "Тренировка уже удалена.")
+		}
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showTrainingHome(ctx, c, ownerID, "Тренировка удалена из Fitlog. Публикация в канале осталась.")
+}
+
 func (b *Bot) handleTrainingSaveOnly(c tele.Context) error {
 	b.respond(c)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -615,6 +694,7 @@ func (b *Bot) showActiveTraining(ctx context.Context, c tele.Context, session tr
 			markup.Data("📝 Заметка", trainingCallbackNote, exerciseID),
 			markup.Data("✏️ Исправить", trainingCallbackEdit, sessionID),
 		),
+		markup.Row(markup.Data("🗑 Удалить тренировку", trainingCallbackDelete, sessionID)),
 	)
 	return b.editTrainingCard(ctx, c, session.OwnerID,
 		training.FormatActiveCard(session, previous, b.deps.Location, prompt), markup,
@@ -627,16 +707,70 @@ func (b *Bot) showFinishedTraining(ctx context.Context, c tele.Context, session 
 		text += "\n\n<b>" + html.EscapeString(notice) + "</b>"
 	}
 	markup := &tele.ReplyMarkup{}
-	rows := make([]tele.Row, 0, 3)
+	rows := make([]tele.Row, 0, 4)
 	if len(b.deps.WorkoutChannelIDs) > 0 && session.PublishedMessageID == nil {
 		rows = append(rows, markup.Row(markup.Data("📣 Опубликовать", trainingCallbackPublish, strconv.FormatInt(session.ID, 10))))
 	}
 	if session.PublishedMessageID == nil {
 		rows = append(rows, markup.Row(markup.Data("✏️ Исправить упражнение", trainingCallbackEdit, strconv.FormatInt(session.ID, 10))))
 	}
-	rows = append(rows, markup.Row(markup.Data("💾 Готово", trainingCallbackSaveOnly)))
+	rows = append(rows,
+		markup.Row(markup.Data("🗑 Удалить тренировку", trainingCallbackDelete, strconv.FormatInt(session.ID, 10))),
+		markup.Row(markup.Data("💾 Готово", trainingCallbackSaveOnly)),
+	)
 	markup.Inline(rows...)
 	return b.editTrainingCard(ctx, c, session.OwnerID, text, markup)
+}
+
+func (b *Bot) showTrainingDeleteConfirmation(
+	ctx context.Context,
+	c tele.Context,
+	session training.Session,
+	notice string,
+) error {
+	var text strings.Builder
+	text.WriteString("<b>🗑 Удалить тренировку?</b>\n\n")
+	fmt.Fprintf(&text, "%s · %s\n", session.StartedAt.In(b.deps.Location).Format("02.01.2006"), html.EscapeString(session.ProgramName))
+	if session.Active() {
+		text.WriteString("Активная тренировка и все введённые подходы будут удалены.")
+	} else {
+		text.WriteString("Тренировка и все её подходы будут удалены из истории.")
+	}
+	if session.PublishedMessageID != nil {
+		text.WriteString(" Бот также удалит публикацию из канала.")
+	}
+	text.WriteString("\n\n<b>Это действие нельзя отменить.</b>")
+	if notice != "" {
+		text.WriteString("\n\n" + html.EscapeString(notice))
+	}
+
+	sessionID := strconv.FormatInt(session.ID, 10)
+	markup := &tele.ReplyMarkup{}
+	markup.Inline(
+		markup.Row(markup.Data("🗑 Да, удалить", trainingCallbackConfirmDelete, sessionID)),
+		markup.Row(markup.Data("‹ Не удалять", trainingCallbackEditBack, sessionID)),
+	)
+	return b.editTrainingCard(ctx, c, session.OwnerID, text.String(), markup)
+}
+
+func (b *Bot) showTrainingDeleteFallback(
+	ctx context.Context,
+	c tele.Context,
+	session training.Session,
+	reason string,
+) error {
+	var text strings.Builder
+	text.WriteString("<b>Не удалось удалить публикацию из канала</b>\n\n")
+	text.WriteString(html.EscapeString(reason))
+	text.WriteString("\n\nМожно удалить тренировку только из Fitlog. Сообщение в канале останется.")
+
+	sessionID := strconv.FormatInt(session.ID, 10)
+	markup := &tele.ReplyMarkup{}
+	markup.Inline(
+		markup.Row(markup.Data("🗑 Удалить только из Fitlog", trainingCallbackDeleteLocal, sessionID)),
+		markup.Row(markup.Data("‹ Не удалять", trainingCallbackEditBack, sessionID)),
+	)
+	return b.editTrainingCard(ctx, c, session.OwnerID, text.String(), markup)
 }
 
 func (b *Bot) showTrainingChannels(ctx context.Context, c tele.Context, session training.Session) error {
@@ -848,6 +982,12 @@ func (b *Bot) trainingCardMiddleware() tele.MiddlewareFunc {
 
 func isMessageNotModified(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "message is not modified")
+}
+
+func isMessageAlreadyDeleted(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "message to delete not found") ||
+		strings.Contains(message, "message not found")
 }
 
 func parseTrainingID(raw string) (int64, error) {

@@ -490,6 +490,19 @@ func (r *TrainingRepo) MarkPublished(ctx context.Context, ownerID, sessionID, ch
 	return nil
 }
 
+func (r *TrainingRepo) DeleteSession(ctx context.Context, ownerID, sessionID int64) error {
+	result, err := r.pool.Exec(ctx,
+		`DELETE FROM training_sessions WHERE id = $1 AND owner_id = $2`, sessionID, ownerID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete training session: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return training.ErrNotFound
+	}
+	return nil
+}
+
 type trainingQuerier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row

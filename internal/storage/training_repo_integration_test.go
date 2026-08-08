@@ -143,4 +143,31 @@ func TestTrainingRepo_Integration(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, history, 2)
 	require.Equal(t, second.ID, history[0].ID)
+
+	require.ErrorIs(t, repo.DeleteSession(ctx, ownerID+1, second.ID), training.ErrNotFound)
+	require.NoError(t, repo.DeleteSession(ctx, ownerID, second.ID))
+	_, err = repo.Session(ctx, ownerID, second.ID)
+	require.ErrorIs(t, err, training.ErrNotFound)
+	history, err = repo.RecentSessions(ctx, ownerID, 10)
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	require.Equal(t, firstSession.ID, history[0].ID)
+
+	activeToDelete, err := repo.StartSession(ctx, ownerID, programs[0].ID, secondStartedAt.Add(24*time.Hour))
+	require.NoError(t, err)
+	activeExerciseID := activeToDelete.CurrentExercise().ID
+	activeToDelete, err = repo.AddSet(ctx, ownerID, training.SetInput{Reps: 8, WeightKG: &secondWeight})
+	require.NoError(t, err)
+	activeSetID := activeToDelete.CurrentExercise().Sets[0].ID
+	require.NoError(t, repo.DeleteSession(ctx, ownerID, activeToDelete.ID))
+	_, err = repo.ActiveSession(ctx, ownerID)
+	require.ErrorIs(t, err, training.ErrNoActiveSession)
+	var exercises, sets int
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT
+			(SELECT count(*) FROM training_session_exercises WHERE id = $1),
+			(SELECT count(*) FROM training_sets WHERE id = $2)`, activeExerciseID, activeSetID,
+	).Scan(&exercises, &sets))
+	require.Zero(t, exercises, "session exercises are deleted through cascading foreign keys")
+	require.Zero(t, sets, "training sets are deleted through cascading foreign keys")
 }

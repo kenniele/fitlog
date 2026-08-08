@@ -129,4 +129,5 @@ type Repository interface {
 	PreviousExercise(ctx context.Context, ownerID, sessionID int64, exerciseName string) (*PreviousExercise, error)
 	RecentSessions(ctx context.Context, ownerID int64, limit int) ([]Session, error)
 	MarkPublished(ctx context.Context, ownerID, sessionID, chatID int64, messageID int) error
+	DeleteSession(ctx context.Context, ownerID, sessionID int64) error
 }
