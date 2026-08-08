@@ -29,7 +29,12 @@ const (
 	trainingCallbackImport         = "training_import"
 	trainingCallbackConfirmImport  = "training_confirm_import"
 	trainingCallbackHistory        = "training_history"
+	trainingCallbackHistorySession = "training_history_session"
 	trainingCallbackPublish        = "training_publish"
+	trainingCallbackPublishChannel = "tr_publish_channel"
+	trainingCallbackEdit           = "training_edit"
+	trainingCallbackReopen         = "training_reopen"
+	trainingCallbackEditBack       = "training_edit_back"
 	trainingCallbackSaveOnly       = "training_save_only"
 
 	maxTrainingImportBytes = 1 << 20
@@ -49,6 +54,11 @@ func (b *Bot) registerTrainingHandlers() {
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackConfirmImport}, b.handleTrainingConfirmImport, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackHistory}, b.handleTrainingHistory, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackPublish}, b.handleTrainingPublish, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackHistorySession}, b.handleTrainingHistorySession, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackPublishChannel}, b.handleTrainingPublishChannel, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackEdit}, b.handleTrainingEdit, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackReopen}, b.handleTrainingReopen, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackEditBack}, b.handleTrainingEditBack, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackSaveOnly}, b.handleTrainingSaveOnly, currentCard)
 }
 
@@ -361,6 +371,8 @@ func (b *Bot) handleTrainingHistory(c tele.Context) error {
 	}
 	var text strings.Builder
 	text.WriteString("<b>🕘 Последние тренировки</b>\n")
+	markup := &tele.ReplyMarkup{}
+	rows := make([]tele.Row, 0, len(sessions)+1)
 	if len(sessions) == 0 {
 		text.WriteString("\nЗавершённых тренировок пока нет.")
 	} else {
@@ -373,18 +385,43 @@ func (b *Bot) handleTrainingHistory(c tele.Context) error {
 				session.StartedAt.In(b.deps.Location).Format("02.01.2006"),
 				html.EscapeString(session.ProgramName), sets,
 			)
+			label := session.StartedAt.In(b.deps.Location).Format("02.01") + " · " + session.ProgramName
+			rows = append(rows, markup.Row(markup.Data(
+				truncateTrainingButton(label),
+				trainingCallbackHistorySession,
+				strconv.FormatInt(session.ID, 10),
+			)))
 		}
 	}
-	markup := &tele.ReplyMarkup{}
-	markup.Inline(markup.Row(markup.Data("‹ Назад", trainingCallbackHome)))
+	rows = append(rows, markup.Row(markup.Data("‹ Назад", trainingCallbackHome)))
+	markup.Inline(rows...)
 	return b.editTrainingCard(ctx, c, ownerID, text.String(), markup)
+}
+
+func (b *Bot) handleTrainingHistorySession(c tele.Context) error {
+	b.respond(c)
+	sessionID, err := parseTrainingID(c.Data())
+	if err != nil {
+		return fmt.Errorf("invalid training history callback %q: %w", c.Data(), err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	session, err := b.deps.Training.Session(ctx, ownerID, sessionID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	if session.Active() {
+		return b.showActiveTraining(ctx, c, session, "Тренировка ещё не завершена.")
+	}
+	return b.showFinishedTraining(ctx, c, session, "")
 }
 
 func (b *Bot) handleTrainingPublish(c tele.Context) error {
 	b.respond(c)
-	sessionID, err := strconv.ParseInt(strings.TrimSpace(c.Data()), 10, 64)
-	if err != nil || sessionID <= 0 {
-		return fmt.Errorf("invalid training publish callback %q", c.Data())
+	sessionID, err := parseTrainingID(c.Data())
+	if err != nil {
+		return fmt.Errorf("invalid training publish callback %q: %w", c.Data(), err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -393,27 +430,117 @@ func (b *Bot) handleTrainingPublish(c tele.Context) error {
 	if err != nil {
 		return b.showTrainingFailure(ctx, c, ownerID, err)
 	}
-	if b.deps.WorkoutChannelID == 0 {
+	if session.Active() {
+		return b.showActiveTraining(ctx, c, session, "Сначала закончи тренировку.")
+	}
+	if len(b.deps.WorkoutChannelIDs) == 0 {
 		return b.showFinishedTraining(ctx, c, session, "Канал для публикации не настроен.")
 	}
 	if session.PublishedMessageID != nil {
 		return b.showFinishedTraining(ctx, c, session, "Эта тренировка уже опубликована.")
 	}
+	return b.showTrainingChannels(ctx, c, session)
+}
+
+func (b *Bot) handleTrainingPublishChannel(c tele.Context) error {
+	b.respond(c)
+	sessionID, channelID, err := parseTrainingPair(c.Data())
+	if err != nil {
+		return fmt.Errorf("invalid training channel callback %q: %w", c.Data(), err)
+	}
+	if !b.workoutChannelAllowed(channelID) {
+		return fmt.Errorf("workout channel %d is not configured", channelID)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	session, err := b.deps.Training.Session(ctx, ownerID, sessionID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	if session.Active() {
+		return b.showActiveTraining(ctx, c, session, "Сначала закончи тренировку.")
+	}
+	if session.PublishedMessageID != nil {
+		return b.showFinishedTraining(ctx, c, session, "Эта тренировка уже опубликована.")
+	}
 	message, err := b.b.Send(
-		&tele.Chat{ID: b.deps.WorkoutChannelID},
+		&tele.Chat{ID: channelID},
 		training.FormatFinished(session, b.deps.Location),
 		&tele.SendOptions{ParseMode: tele.ModeHTML},
 	)
 	if err != nil {
 		return b.showFinishedTraining(ctx, c, session, "Не удалось опубликовать: "+err.Error())
 	}
-	if err := b.deps.Training.MarkPublished(ctx, ownerID, session.ID, b.deps.WorkoutChannelID, message.ID); err != nil {
+	if err := b.deps.Training.MarkPublished(ctx, ownerID, session.ID, channelID, message.ID); err != nil {
 		b.deps.Logger.Error("mark training published", "err", err, "session_id", session.ID, "message_id", message.ID)
 		return b.showFinishedTraining(ctx, c, session, "Сообщение отправлено, но отметка о публикации не сохранилась.")
 	}
-	session.PublishedChatID = &b.deps.WorkoutChannelID
+	session.PublishedChatID = &channelID
 	session.PublishedMessageID = &message.ID
-	return b.showFinishedTraining(ctx, c, session, "Опубликовано в канале.")
+	return b.showFinishedTraining(ctx, c, session, "Опубликовано в «"+b.workoutChannelTitle(channelID)+"».")
+}
+
+func (b *Bot) handleTrainingEdit(c tele.Context) error {
+	b.respond(c)
+	sessionID, err := parseTrainingID(c.Data())
+	if err != nil {
+		return fmt.Errorf("invalid training edit callback %q: %w", c.Data(), err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	session, err := b.deps.Training.Session(ctx, ownerID, sessionID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showTrainingExerciseEditor(ctx, c, session, "")
+}
+
+func (b *Bot) handleTrainingEditBack(c tele.Context) error {
+	b.respond(c)
+	sessionID, err := parseTrainingID(c.Data())
+	if err != nil {
+		return fmt.Errorf("invalid training edit back callback %q: %w", c.Data(), err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	session, err := b.deps.Training.Session(ctx, ownerID, sessionID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	if session.Active() {
+		return b.showActiveTraining(ctx, c, session, b.trainingPrompt(ctx, ownerID))
+	}
+	return b.showFinishedTraining(ctx, c, session, "")
+}
+
+func (b *Bot) handleTrainingReopen(c tele.Context) error {
+	b.respond(c)
+	sessionID, exerciseID, err := parseTrainingPair(c.Data())
+	if err != nil {
+		return fmt.Errorf("invalid training reopen callback %q: %w", c.Data(), err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	session, err := b.deps.Training.ReopenExercise(ctx, ownerID, sessionID, exerciseID)
+	if err == nil {
+		return b.showActiveTraining(ctx, c, session, "Упражнение открыто. Подходы и заметка сохранены.")
+	}
+	original, loadErr := b.deps.Training.Session(ctx, ownerID, sessionID)
+	if loadErr == nil {
+		switch {
+		case errors.Is(err, training.ErrActiveSession):
+			return b.showFinishedTraining(ctx, c, original, "Сначала закончи текущую активную тренировку.")
+		case errors.Is(err, training.ErrPublished):
+			return b.showFinishedTraining(ctx, c, original, "Опубликованную тренировку уже нельзя изменить.")
+		case errors.Is(err, training.ErrNotEditable):
+			return b.showTrainingExerciseEditor(ctx, c, original, "Это упражнение ещё не было завершено.")
+		}
+	}
+	return b.showTrainingFailure(ctx, c, ownerID, err)
 }
 
 func (b *Bot) handleTrainingSaveOnly(c tele.Context) error {
@@ -471,16 +598,27 @@ func (b *Bot) showActiveTraining(ctx context.Context, c tele.Context, session tr
 	if exercise == nil {
 		return b.showTrainingFailure(ctx, c, session.OwnerID, training.ErrNotFound)
 	}
+	previous, err := b.deps.Training.PreviousExercise(ctx, session.OwnerID, session.ID, exercise.Name)
+	if err != nil {
+		b.deps.Logger.Warn("load previous exercise", "err", err, "session_id", session.ID, "exercise", exercise.Name)
+		previous = nil
+	}
 	exerciseID := strconv.FormatInt(exercise.ID, 10)
+	sessionID := strconv.FormatInt(session.ID, 10)
 	markup := &tele.ReplyMarkup{}
 	markup.Inline(
 		markup.Row(
 			markup.Data("➕ Подход", trainingCallbackAddSet, exerciseID),
 			markup.Data("✅ Конец упражнения", trainingCallbackFinishExercise, exerciseID),
 		),
-		markup.Row(markup.Data("📝 Заметка", trainingCallbackNote, exerciseID)),
+		markup.Row(
+			markup.Data("📝 Заметка", trainingCallbackNote, exerciseID),
+			markup.Data("✏️ Исправить", trainingCallbackEdit, sessionID),
+		),
 	)
-	return b.editTrainingCard(ctx, c, session.OwnerID, training.FormatActiveCard(session, prompt), markup)
+	return b.editTrainingCard(ctx, c, session.OwnerID,
+		training.FormatActiveCard(session, previous, b.deps.Location, prompt), markup,
+	)
 }
 
 func (b *Bot) showFinishedTraining(ctx context.Context, c tele.Context, session training.Session, notice string) error {
@@ -489,13 +627,78 @@ func (b *Bot) showFinishedTraining(ctx context.Context, c tele.Context, session 
 		text += "\n\n<b>" + html.EscapeString(notice) + "</b>"
 	}
 	markup := &tele.ReplyMarkup{}
-	rows := make([]tele.Row, 0, 2)
-	if b.deps.WorkoutChannelID != 0 && session.PublishedMessageID == nil {
+	rows := make([]tele.Row, 0, 3)
+	if len(b.deps.WorkoutChannelIDs) > 0 && session.PublishedMessageID == nil {
 		rows = append(rows, markup.Row(markup.Data("📣 Опубликовать", trainingCallbackPublish, strconv.FormatInt(session.ID, 10))))
+	}
+	if session.PublishedMessageID == nil {
+		rows = append(rows, markup.Row(markup.Data("✏️ Исправить упражнение", trainingCallbackEdit, strconv.FormatInt(session.ID, 10))))
 	}
 	rows = append(rows, markup.Row(markup.Data("💾 Готово", trainingCallbackSaveOnly)))
 	markup.Inline(rows...)
 	return b.editTrainingCard(ctx, c, session.OwnerID, text, markup)
+}
+
+func (b *Bot) showTrainingChannels(ctx context.Context, c tele.Context, session training.Session) error {
+	var text strings.Builder
+	text.WriteString("<b>📣 Куда опубликовать?</b>\n\n")
+	fmt.Fprintf(&text, "%s · %s\n", session.StartedAt.In(b.deps.Location).Format("02.01.2006"), html.EscapeString(session.ProgramName))
+	text.WriteString("Выбери канал:")
+
+	markup := &tele.ReplyMarkup{}
+	rows := make([]tele.Row, 0, len(b.deps.WorkoutChannelIDs)+1)
+	for _, channelID := range b.deps.WorkoutChannelIDs {
+		payload := trainingPair(session.ID, channelID)
+		rows = append(rows, markup.Row(markup.Data(
+			"📣 "+truncateTrainingButton(b.workoutChannelTitle(channelID)),
+			trainingCallbackPublishChannel,
+			payload,
+		)))
+	}
+	rows = append(rows, markup.Row(markup.Data(
+		"‹ Назад", trainingCallbackEditBack, strconv.FormatInt(session.ID, 10),
+	)))
+	markup.Inline(rows...)
+	return b.editTrainingCard(ctx, c, session.OwnerID, text.String(), markup)
+}
+
+func (b *Bot) showTrainingExerciseEditor(
+	ctx context.Context,
+	c tele.Context,
+	session training.Session,
+	notice string,
+) error {
+	if session.PublishedMessageID != nil {
+		return b.showFinishedTraining(ctx, c, session, "Опубликованную тренировку уже нельзя изменить.")
+	}
+	var text strings.Builder
+	text.WriteString("<b>✏️ Исправить упражнение</b>\n\n")
+	text.WriteString("Выбери упражнение. Оно снова станет текущим; сохранённые подходы и заметка останутся на месте.")
+	if notice != "" {
+		text.WriteString("\n\n<b>" + html.EscapeString(notice) + "</b>")
+	}
+
+	markup := &tele.ReplyMarkup{}
+	rows := make([]tele.Row, 0, len(session.Exercises)+1)
+	for _, exercise := range session.Exercises {
+		if session.Active() && !exercise.Complete && exercise.Position != session.CurrentPosition {
+			continue
+		}
+		label := fmt.Sprintf("%d. %s", exercise.Position, exercise.Name)
+		if exercise.Position == session.CurrentPosition && session.Active() {
+			label += " · сейчас"
+		}
+		rows = append(rows, markup.Row(markup.Data(
+			truncateTrainingButton(label),
+			trainingCallbackReopen,
+			trainingPair(session.ID, exercise.ID),
+		)))
+	}
+	rows = append(rows, markup.Row(markup.Data(
+		"‹ Назад", trainingCallbackEditBack, strconv.FormatInt(session.ID, 10),
+	)))
+	markup.Inline(rows...)
+	return b.editTrainingCard(ctx, c, session.OwnerID, text.String(), markup)
 }
 
 func (b *Bot) showImportPrompt(ctx context.Context, c tele.Context, ownerID int64, notice string) error {
@@ -645,4 +848,65 @@ func (b *Bot) trainingCardMiddleware() tele.MiddlewareFunc {
 
 func isMessageNotModified(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "message is not modified")
+}
+
+func parseTrainingID(raw string) (int64, error) {
+	id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid ID")
+	}
+	return id, nil
+}
+
+func trainingPair(first, second int64) string {
+	return strconv.FormatInt(first, 10) + ":" + strconv.FormatInt(second, 10)
+}
+
+func parseTrainingPair(raw string) (int64, int64, error) {
+	parts := strings.Split(strings.TrimSpace(raw), ":")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("expected two IDs")
+	}
+	first, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || first <= 0 {
+		return 0, 0, fmt.Errorf("invalid first ID")
+	}
+	second, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || second == 0 {
+		return 0, 0, fmt.Errorf("invalid second ID")
+	}
+	return first, second, nil
+}
+
+func (b *Bot) workoutChannelAllowed(channelID int64) bool {
+	for _, configured := range b.deps.WorkoutChannelIDs {
+		if configured == channelID {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *Bot) workoutChannelTitle(channelID int64) string {
+	chat, err := b.b.ChatByID(channelID)
+	if err != nil {
+		b.deps.Logger.Warn("resolve workout channel", "err", err, "channel_id", channelID)
+		return strconv.FormatInt(channelID, 10)
+	}
+	if title := strings.TrimSpace(chat.Title); title != "" {
+		return title
+	}
+	if username := strings.TrimSpace(chat.Username); username != "" {
+		return "@" + username
+	}
+	return strconv.FormatInt(channelID, 10)
+}
+
+func truncateTrainingButton(value string) string {
+	const maxRunes = 48
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) <= maxRunes {
+		return string(runes)
+	}
+	return string(runes[:maxRunes-1]) + "…"
 }

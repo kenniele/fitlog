@@ -36,17 +36,17 @@ type FatSecretAuthorizer interface {
 }
 
 type Deps struct {
-	Whoop            whoop.ReportUseCase
-	FatSecret        fatsecret.ReportUseCase
-	Articles         obsidian.ReportUseCase
-	PublicBaseURL    string
-	OAuthConfig      *oauth2.Config
-	States           StateIssuer
-	FatSecretAuth    FatSecretAuthorizer
-	Training         *training.UseCase
-	WorkoutChannelID int64
-	Location         *time.Location
-	Logger           *slog.Logger
+	Whoop             whoop.ReportUseCase
+	FatSecret         fatsecret.ReportUseCase
+	Articles          obsidian.ReportUseCase
+	PublicBaseURL     string
+	OAuthConfig       *oauth2.Config
+	States            StateIssuer
+	FatSecretAuth     FatSecretAuthorizer
+	Training          *training.UseCase
+	WorkoutChannelIDs []int64
+	Location          *time.Location
+	Logger            *slog.Logger
 }
 
 // Bot is deliberately a thin delivery adapter. Fetching, transformation, and

@@ -24,3 +24,11 @@ func TestBaseURLRejectsUnsupportedScheme(t *testing.T) {
 	_, err := (&Config{PublicBaseURL: "file:///tmp/vault"}).BaseURL()
 	require.Error(t, err)
 }
+
+func TestWorkoutChannelsSupportsLegacyAndList(t *testing.T) {
+	cfg := Config{
+		TelegramWorkoutChannelID:  -1001,
+		TelegramWorkoutChannelIDs: []int64{-1002, -1001, 0, -1003},
+	}
+	require.Equal(t, []int64{-1001, -1002, -1003}, cfg.WorkoutChannels())
+}

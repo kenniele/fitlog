@@ -36,7 +36,8 @@ In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀*
 | `NUTRITION_ESTIMATED_TDEE`     | no       | Maintenance kcal/day used by the 14-day deficit analysis             |
 | `TELEGRAM_BOT_TOKEN`           | yes      | From @BotFather                                                      |
 | `TELEGRAM_ALLOWED_USER_IDS`    | yes      | Comma-separated int64 Telegram user IDs                              |
-| `TELEGRAM_WORKOUT_CHANNEL_ID`  | no       | Channel ID for completed workouts; bot needs permission to post      |
+| `TELEGRAM_WORKOUT_CHANNEL_IDS` | no       | Comma-separated publish-channel IDs; bot needs permission to post    |
+| `TELEGRAM_WORKOUT_CHANNEL_ID`  | no       | Legacy single channel ID; combined with the plural setting           |
 | `HTTP_ADDR`                    | no       | Default `:8080`. Serves OAuth callbacks + DB-aware `/healthz`.       |
 | `TZ_LOCATION`                  | no       | Default `Europe/Moscow`. Used for "today"/"yesterday" boundaries.    |
 | `LOG_LEVEL`                    | no       | `debug` / `info` / `warn` / `error`. Default `info`.                 |
@@ -67,7 +68,7 @@ Press **Тренировка 🏋️** to open a single control message. Inline 
 12Р -
 ```
 
-The first form records external weight; the dash records bodyweight. Letter case, decimal comma/dot, and the common hyphen/dash characters are normalized. The temporary input message is deleted after it is processed. Each exercise has **Подход**, **Конец упражнения**, and **Заметка** actions. Active state and the control-message ID are stored in PostgreSQL, so a workout can resume after an app restart.
+The first form records external weight; the dash records bodyweight. Letter case, decimal comma/dot, and the common hyphen/dash characters are normalized. The temporary input message is deleted after it is processed. Each exercise has **Подход**, **Конец упражнения**, **Заметка**, and **Исправить** actions. Reopening an exercise preserves its existing sets and note, and finishing it continues with the next exercise that is still incomplete. The active card also shows the same exercise's sets from the most recent earlier completed workout. Active state and the control-message ID are stored in PostgreSQL, so a workout can resume after an app restart.
 
 Programs can be imported from a UTF-8 TXT file. A blank line separates programs, the first line of each block is the program name, and the remaining lines are ordered exercises:
 
@@ -90,7 +91,7 @@ program,exercise
 Вторник,Подтягивания
 ```
 
-The bot shows a preview before saving. An imported program replaces an existing program with the same name; programs absent from the file remain untouched. Running sessions hold an exercise-name snapshot, so replacing a program never rewrites workout history. If `TELEGRAM_WORKOUT_CHANNEL_ID` is configured, the final card can publish the formatted result to that channel.
+The bot shows a preview before saving. An imported program replaces an existing program with the same name; programs absent from the file remain untouched. Running sessions hold an exercise-name snapshot, so replacing a program never rewrites workout history. Completed workouts remain clickable in history, so an unpublished workout can be reopened for correction or publication later. If `TELEGRAM_WORKOUT_CHANNEL_IDS` (or the legacy singular setting) is configured, **Publish** opens a channel picker and sends the formatted result to the selected destination. Telegram bots cannot enumerate all channels automatically, so each available channel must be present in configuration and the bot must be allowed to post there.
 
 ## Obsidian articles
 

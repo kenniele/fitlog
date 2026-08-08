@@ -275,28 +275,166 @@ func (r *TrainingRepo) FinishCurrentExercise(ctx context.Context, ownerID int64,
 	if _, err := tx.Exec(ctx, `UPDATE training_session_exercises SET complete = true WHERE id = $1`, exerciseID); err != nil {
 		return training.Session{}, fmt.Errorf("complete exercise: %w", err)
 	}
-	var currentPosition, exerciseCount int
-	if err := tx.QueryRow(ctx,
-		`SELECT current_position, (SELECT count(*) FROM training_session_exercises WHERE session_id = s.id)
-		 FROM training_sessions s WHERE id = $1`, sessionID,
-	).Scan(&currentPosition, &exerciseCount); err != nil {
-		return training.Session{}, fmt.Errorf("select session progress: %w", err)
-	}
-	if currentPosition >= exerciseCount {
+	var nextPosition int
+	err = tx.QueryRow(ctx, `
+		SELECT position
+		FROM training_session_exercises
+		WHERE session_id = $1 AND complete = false
+		ORDER BY position
+		LIMIT 1`, sessionID).Scan(&nextPosition)
+	if errors.Is(err, pgx.ErrNoRows) {
 		if _, err := tx.Exec(ctx,
 			`UPDATE training_sessions SET status = 'finished', finished_at = $1 WHERE id = $2`, now, sessionID,
 		); err != nil {
 			return training.Session{}, fmt.Errorf("finish training session: %w", err)
 		}
-	} else if _, err := tx.Exec(ctx,
-		`UPDATE training_sessions SET current_position = current_position + 1 WHERE id = $1`, sessionID,
-	); err != nil {
-		return training.Session{}, fmt.Errorf("advance training session: %w", err)
+	} else if err != nil {
+		return training.Session{}, fmt.Errorf("select next exercise: %w", err)
+	} else {
+		if _, err := tx.Exec(ctx,
+			`UPDATE training_sessions SET current_position = $1 WHERE id = $2`, nextPosition, sessionID,
+		); err != nil {
+			return training.Session{}, fmt.Errorf("advance training session: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return training.Session{}, fmt.Errorf("commit finish exercise: %w", err)
 	}
 	return r.loadSession(ctx, r.pool, ownerID, sessionID)
+}
+
+func (r *TrainingRepo) ReopenExercise(
+	ctx context.Context,
+	ownerID, sessionID, exerciseID int64,
+) (training.Session, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return training.Session{}, fmt.Errorf("begin reopen exercise: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var status string
+	var currentPosition, position int
+	var complete, published bool
+	err = tx.QueryRow(ctx, `
+		SELECT s.status, s.current_position, s.published_message_id IS NOT NULL,
+		       e.position, e.complete
+		FROM training_sessions s
+		JOIN training_session_exercises e ON e.session_id = s.id
+		WHERE s.id = $1 AND s.owner_id = $2 AND e.id = $3
+		FOR UPDATE OF s, e`, sessionID, ownerID, exerciseID,
+	).Scan(&status, &currentPosition, &published, &position, &complete)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return training.Session{}, training.ErrNotFound
+	}
+	if err != nil {
+		return training.Session{}, fmt.Errorf("select exercise to reopen: %w", err)
+	}
+	if published {
+		return training.Session{}, training.ErrPublished
+	}
+	if status == "active" && !complete && position != currentPosition {
+		return training.Session{}, training.ErrNotEditable
+	}
+	if status == "finished" {
+		var activeID int64
+		err = tx.QueryRow(ctx, `
+			SELECT id
+			FROM training_sessions
+			WHERE owner_id = $1 AND status = 'active' AND id <> $2
+			LIMIT 1`, ownerID, sessionID).Scan(&activeID)
+		if err == nil {
+			return training.Session{}, training.ErrActiveSession
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return training.Session{}, fmt.Errorf("select active session before reopen: %w", err)
+		}
+	}
+	if status != "active" && status != "finished" {
+		return training.Session{}, training.ErrNotEditable
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE training_session_exercises SET complete = false WHERE id = $1`, exerciseID,
+	); err != nil {
+		return training.Session{}, fmt.Errorf("reopen exercise: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE training_sessions
+		SET status = 'active', current_position = $1, finished_at = NULL
+		WHERE id = $2`, position, sessionID,
+	); err != nil {
+		if isUniqueViolation(err) {
+			return training.Session{}, training.ErrActiveSession
+		}
+		return training.Session{}, fmt.Errorf("reactivate training session: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		if isUniqueViolation(err) {
+			return training.Session{}, training.ErrActiveSession
+		}
+		return training.Session{}, fmt.Errorf("commit reopen exercise: %w", err)
+	}
+	return r.loadSession(ctx, r.pool, ownerID, sessionID)
+}
+
+func (r *TrainingRepo) PreviousExercise(
+	ctx context.Context,
+	ownerID, sessionID int64,
+	exerciseName string,
+) (*training.PreviousExercise, error) {
+	rows, err := r.pool.Query(ctx, `
+		WITH previous AS (
+			SELECT s.started_at, s.program_name, e.id AS exercise_id
+			FROM training_sessions s
+			JOIN training_session_exercises e ON e.session_id = s.id
+			WHERE s.owner_id = $1
+			  AND s.id <> $2
+			  AND s.status = 'finished'
+			  AND s.started_at < (
+				SELECT started_at FROM training_sessions WHERE id = $2 AND owner_id = $1
+			  )
+			  AND lower(btrim(e.name)) = lower(btrim($3))
+			  AND EXISTS (
+				SELECT 1 FROM training_sets candidate WHERE candidate.session_exercise_id = e.id
+			  )
+			ORDER BY s.started_at DESC, s.id DESC
+			LIMIT 1
+		)
+		SELECT previous.started_at, previous.program_name,
+		       sets.id, sets.position, sets.reps, sets.weight_kg::double precision
+		FROM previous
+		JOIN training_sets sets ON sets.session_exercise_id = previous.exercise_id
+		ORDER BY sets.position`, ownerID, sessionID, exerciseName)
+	if err != nil {
+		return nil, fmt.Errorf("select previous exercise: %w", err)
+	}
+	defer rows.Close()
+
+	var previous *training.PreviousExercise
+	for rows.Next() {
+		var startedAt time.Time
+		var programName string
+		var set training.WorkoutSet
+		var weight pgtype.Float8
+		if err := rows.Scan(
+			&startedAt, &programName, &set.ID, &set.Position, &set.Reps, &weight,
+		); err != nil {
+			return nil, fmt.Errorf("scan previous exercise: %w", err)
+		}
+		if previous == nil {
+			previous = &training.PreviousExercise{StartedAt: startedAt, ProgramName: programName}
+		}
+		if weight.Valid {
+			value := weight.Float64
+			set.WeightKG = &value
+		}
+		previous.Sets = append(previous.Sets, set)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate previous exercise: %w", err)
+	}
+	return previous, nil
 }
 
 func (r *TrainingRepo) RecentSessions(ctx context.Context, ownerID int64, limit int) ([]training.Session, error) {

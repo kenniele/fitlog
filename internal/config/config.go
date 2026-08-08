@@ -26,9 +26,10 @@ type Config struct {
 	FatSecretAccessSecret   string  `env:"FATSECRET_ACCESS_SECRET"`
 	NutritionEstimatedTDEE  float64 `env:"NUTRITION_ESTIMATED_TDEE"`
 
-	TelegramBotToken         string  `env:"TELEGRAM_BOT_TOKEN,required"`
-	TelegramAllowedUserIDs   []int64 `env:"TELEGRAM_ALLOWED_USER_IDS,required" envSeparator:","`
-	TelegramWorkoutChannelID int64   `env:"TELEGRAM_WORKOUT_CHANNEL_ID"`
+	TelegramBotToken          string  `env:"TELEGRAM_BOT_TOKEN,required"`
+	TelegramAllowedUserIDs    []int64 `env:"TELEGRAM_ALLOWED_USER_IDS,required" envSeparator:","`
+	TelegramWorkoutChannelID  int64   `env:"TELEGRAM_WORKOUT_CHANNEL_ID"`
+	TelegramWorkoutChannelIDs []int64 `env:"TELEGRAM_WORKOUT_CHANNEL_IDS" envSeparator:","`
 
 	LogLevel   string `env:"LOG_LEVEL" envDefault:"info"`
 	HTTPAddr   string `env:"HTTP_ADDR" envDefault:":8080"`
@@ -63,6 +64,28 @@ func (c *Config) Location() (*time.Location, error) {
 		return nil, fmt.Errorf("load tz %q: %w", c.TZLocation, err)
 	}
 	return loc, nil
+}
+
+// WorkoutChannels returns the configured publishing destinations without
+// duplicates. The singular value remains supported for existing deployments.
+func (c *Config) WorkoutChannels() []int64 {
+	seen := make(map[int64]struct{}, len(c.TelegramWorkoutChannelIDs)+1)
+	channels := make([]int64, 0, len(c.TelegramWorkoutChannelIDs)+1)
+	appendChannel := func(id int64) {
+		if id == 0 {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		channels = append(channels, id)
+	}
+	appendChannel(c.TelegramWorkoutChannelID)
+	for _, id := range c.TelegramWorkoutChannelIDs {
+		appendChannel(id)
+	}
+	return channels
 }
 
 // Load parses environment variables into Config. If a .env file exists in

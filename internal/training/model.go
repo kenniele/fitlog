@@ -15,6 +15,8 @@ var (
 	ErrActiveSession   = errors.New("an active training session already exists")
 	ErrNoActiveSession = errors.New("no active training session")
 	ErrNoPendingImport = errors.New("no pending program import")
+	ErrPublished       = errors.New("published training cannot be edited")
+	ErrNotEditable     = errors.New("exercise cannot be edited yet")
 )
 
 // InputMode describes which free-form Telegram message the workout card is
@@ -60,6 +62,12 @@ type WorkoutSet struct {
 	Position int
 	Reps     int
 	WeightKG *float64
+}
+
+type PreviousExercise struct {
+	StartedAt   time.Time
+	ProgramName string
+	Sets        []WorkoutSet
 }
 
 type SessionExercise struct {
@@ -117,6 +125,8 @@ type Repository interface {
 	AddSet(ctx context.Context, ownerID int64, input SetInput) (Session, error)
 	SetCurrentExerciseNote(ctx context.Context, ownerID int64, note string) (Session, error)
 	FinishCurrentExercise(ctx context.Context, ownerID int64, now time.Time) (Session, error)
+	ReopenExercise(ctx context.Context, ownerID, sessionID, exerciseID int64) (Session, error)
+	PreviousExercise(ctx context.Context, ownerID, sessionID int64, exerciseName string) (*PreviousExercise, error)
 	RecentSessions(ctx context.Context, ownerID int64, limit int) ([]Session, error)
 	MarkPublished(ctx context.Context, ownerID, sessionID, chatID int64, messageID int) error
 }

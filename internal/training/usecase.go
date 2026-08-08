@@ -173,6 +173,21 @@ func (u *UseCase) FinishExercise(ctx context.Context, ownerID int64, now time.Ti
 	return u.repo.FinishCurrentExercise(ctx, ownerID, now)
 }
 
+func (u *UseCase) ReopenExercise(ctx context.Context, ownerID, sessionID, exerciseID int64) (Session, error) {
+	if err := u.ClearInput(ctx, ownerID); err != nil {
+		return Session{}, err
+	}
+	return u.repo.ReopenExercise(ctx, ownerID, sessionID, exerciseID)
+}
+
+func (u *UseCase) PreviousExercise(
+	ctx context.Context,
+	ownerID, sessionID int64,
+	exerciseName string,
+) (*PreviousExercise, error) {
+	return u.repo.PreviousExercise(ctx, ownerID, sessionID, exerciseName)
+}
+
 func (u *UseCase) Session(ctx context.Context, ownerID, sessionID int64) (Session, error) {
 	return u.repo.Session(ctx, ownerID, sessionID)
 }

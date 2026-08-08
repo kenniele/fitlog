@@ -17,7 +17,7 @@ func FormatSet(set WorkoutSet) string {
 }
 
 // FormatActiveCard returns HTML suitable for the one Telegram control card.
-func FormatActiveCard(session Session, prompt string) string {
+func FormatActiveCard(session Session, previous *PreviousExercise, loc *time.Location, prompt string) string {
 	exercise := session.CurrentExercise()
 	if exercise == nil {
 		return "<b>🏋️ " + html.EscapeString(session.ProgramName) + "</b>\n\nНе удалось найти текущее упражнение."
@@ -26,10 +26,16 @@ func FormatActiveCard(session Session, prompt string) string {
 	fmt.Fprintf(&out, "<b>🏋️ %s</b>\n", html.EscapeString(session.ProgramName))
 	fmt.Fprintf(&out, "Упражнение %d из %d\n\n", exercise.Position, len(session.Exercises))
 	fmt.Fprintf(&out, "<b>%s</b>\n", html.EscapeString(exercise.Name))
+	if previous != nil && len(previous.Sets) > 0 {
+		fmt.Fprintf(&out, "\n<b>Прошлый раз · %s</b>\n", previous.StartedAt.In(loc).Format("02.01.2006"))
+		for _, set := range previous.Sets {
+			fmt.Fprintf(&out, "%d. %s\n", set.Position, FormatSet(set))
+		}
+	}
 	if len(exercise.Sets) == 0 {
-		out.WriteString("\nПодходов пока нет.\n")
+		out.WriteString("\nТекущие подходы: пока нет.\n")
 	} else {
-		out.WriteString("\nПодходы:\n")
+		out.WriteString("\nТекущие подходы:\n")
 		for _, set := range exercise.Sets {
 			fmt.Fprintf(&out, "%d. %s\n", set.Position, FormatSet(set))
 		}

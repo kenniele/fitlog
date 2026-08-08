@@ -30,9 +30,20 @@ func TestFormatActiveAndFinished(t *testing.T) {
 		},
 	}
 
-	active := FormatActiveCard(session, "Отправь: 12Р 40КГ или 12Р -")
+	previousWeight := 55.0
+	previous := &PreviousExercise{
+		StartedAt: time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC),
+		Sets: []WorkoutSet{
+			{Position: 1, Reps: 10, WeightKG: &previousWeight},
+			{Position: 2, Reps: 12},
+		},
+	}
+	active := FormatActiveCard(session, previous, time.UTC, "Отправь: 12Р 40КГ или 12Р -")
 	require.Contains(t, active, "Понедельник &amp; спина")
 	require.Contains(t, active, "Тяга &lt;блока&gt;")
+	require.Contains(t, active, "Прошлый раз · 01.08.2026")
+	require.Contains(t, active, "1. 10Р 55КГ")
+	require.Contains(t, active, "2. 12Р -")
 	require.Contains(t, active, "1. 12Р 58.9КГ")
 	require.Contains(t, active, "2. 8Р -")
 	require.Contains(t, active, "Локоть &amp; плечо")
