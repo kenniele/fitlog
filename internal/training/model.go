@@ -16,6 +16,7 @@ var (
 	ErrNoActiveSession = errors.New("no active training session")
 	ErrNoPendingImport = errors.New("no pending program import")
 	ErrNotEditable     = errors.New("exercise cannot be edited yet")
+	ErrInvalidPage     = errors.New("invalid page")
 )
 
 // InputMode describes which free-form Telegram message the workout card is
@@ -28,6 +29,7 @@ const (
 	InputNote       InputMode = "note"
 	InputImportFile InputMode = "import_file"
 	InputImportOK   InputMode = "import_preview"
+	InputRename     InputMode = "exercise_rename"
 )
 
 // ProgramInput is the normalized representation produced by a TXT or CSV
@@ -38,8 +40,21 @@ type ProgramInput struct {
 }
 
 type ImportPreview struct {
-	Filename string         `json:"filename"`
-	Programs []ProgramInput `json:"programs"`
+	Filename       string         `json:"filename"`
+	Programs       []ProgramInput `json:"programs"`
+	ReviewStarted  bool           `json:"review_started,omitempty"`
+	ReviewProgram  int            `json:"review_program,omitempty"`
+	ReviewExercise int            `json:"review_exercise,omitempty"`
+}
+
+type ImportExerciseReview struct {
+	ProgramIndex  int
+	ExerciseIndex int
+	Current       int
+	Total         int
+	ProgramName   string
+	ProposedName  string
+	Similar       []Exercise
 }
 
 type Program struct {
@@ -47,6 +62,35 @@ type Program struct {
 	OwnerID   int64
 	Name      string
 	Exercises []string
+}
+
+type Exercise struct {
+	ID       int64
+	OwnerID  int64
+	Name     string
+	Programs []string
+}
+
+type ExercisePage struct {
+	Items      []Exercise
+	Page       int
+	PageSize   int
+	TotalItems int
+	TotalPages int
+}
+
+type SessionPage struct {
+	Items      []Session
+	Page       int
+	PageSize   int
+	TotalItems int
+	TotalPages int
+}
+
+type RenameResult struct {
+	Exercise          Exercise
+	Merged            bool
+	PublishedSessions []Session
 }
 
 // SetInput is the structured meaning of either "12Р 40КГ" or "12Р -".
@@ -70,12 +114,13 @@ type PreviousExercise struct {
 }
 
 type SessionExercise struct {
-	ID       int64
-	Position int
-	Name     string
-	Note     string
-	Complete bool
-	Sets     []WorkoutSet
+	ID         int64
+	ExerciseID *int64
+	Position   int
+	Name       string
+	Note       string
+	Complete   bool
+	Sets       []WorkoutSet
 }
 
 type Session struct {
@@ -104,11 +149,12 @@ func (s Session) CurrentExercise() *SessionExercise {
 }
 
 type UIState struct {
-	OwnerID       int64
-	ChatID        int64
-	MessageID     int
-	Mode          InputMode
-	PendingImport *ImportPreview
+	OwnerID           int64
+	ChatID            int64
+	MessageID         int
+	Mode              InputMode
+	PendingImport     *ImportPreview
+	PendingExerciseID *int64
 }
 
 // Repository persists all durable workout and card state. The PostgreSQL
@@ -118,6 +164,10 @@ type Repository interface {
 	SaveUIState(ctx context.Context, state UIState) error
 	ListPrograms(ctx context.Context, ownerID int64) ([]Program, error)
 	ReplacePrograms(ctx context.Context, ownerID int64, programs []ProgramInput) error
+	ListExercises(ctx context.Context, ownerID int64, limit, offset int) ([]Exercise, int, error)
+	SimilarExercises(ctx context.Context, ownerID int64, name string, limit int) ([]Exercise, error)
+	Exercise(ctx context.Context, ownerID, exerciseID int64) (Exercise, error)
+	RenameExercise(ctx context.Context, ownerID, exerciseID int64, name string) (RenameResult, error)
 	StartSession(ctx context.Context, ownerID, programID int64, now time.Time) (Session, error)
 	ActiveSession(ctx context.Context, ownerID int64) (Session, error)
 	Session(ctx context.Context, ownerID, sessionID int64) (Session, error)
@@ -126,7 +176,7 @@ type Repository interface {
 	FinishCurrentExercise(ctx context.Context, ownerID int64, now time.Time) (Session, error)
 	ReopenExercise(ctx context.Context, ownerID, sessionID, exerciseID int64) (Session, error)
 	PreviousExercise(ctx context.Context, ownerID, sessionID int64, exerciseName string) (*PreviousExercise, error)
-	RecentSessions(ctx context.Context, ownerID int64, limit int) ([]Session, error)
+	RecentSessions(ctx context.Context, ownerID int64, limit, offset int) ([]Session, int, error)
 	MarkPublished(ctx context.Context, ownerID, sessionID, chatID int64, messageID int) error
 	DeleteSession(ctx context.Context, ownerID, sessionID int64) error
 }

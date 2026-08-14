@@ -49,9 +49,20 @@ func TestFormatActiveAndFinished(t *testing.T) {
 	require.Contains(t, active, "Локоть &amp; плечо")
 
 	session.Status = "finished"
+	finishedAt := session.StartedAt.Add(75 * time.Minute)
+	session.FinishedAt = &finishedAt
 	finished := FormatFinished(session, time.UTC)
 	require.Contains(t, finished, "05.08.2026 · Понедельник &amp; спина")
+	require.Contains(t, finished, "Начало: 12:00 · Конец: 13:15")
+	require.Contains(t, finished, "Длительность: 1 ч 15 мин")
 	require.Contains(t, finished, "пропуск")
 	require.Contains(t, finished, "Подходов: 2")
 	require.Contains(t, finished, "Пропусков: 1")
+}
+
+func TestFormatSessionDuration(t *testing.T) {
+	started := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	finished := started.Add(42*time.Minute + 20*time.Second)
+	require.Equal(t, "42 мин", FormatSessionDuration(Session{StartedAt: started, FinishedAt: &finished}))
+	require.Equal(t, "—", FormatSessionDuration(Session{StartedAt: started}))
 }

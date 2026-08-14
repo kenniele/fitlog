@@ -25,14 +25,15 @@ func NewTrainingRepo(pool *pgxpool.Pool) *TrainingRepo {
 
 func (r *TrainingRepo) GetUIState(ctx context.Context, ownerID int64) (training.UIState, error) {
 	const q = `
-		SELECT owner_id, chat_id, message_id, mode, pending_import
+		SELECT owner_id, chat_id, message_id, mode, pending_import, pending_exercise_id
 		FROM training_ui_states
 		WHERE owner_id = $1`
 	var state training.UIState
 	var mode string
 	var pending []byte
+	var pendingExerciseID pgtype.Int8
 	err := r.pool.QueryRow(ctx, q, ownerID).Scan(
-		&state.OwnerID, &state.ChatID, &state.MessageID, &mode, &pending,
+		&state.OwnerID, &state.ChatID, &state.MessageID, &mode, &pending, &pendingExerciseID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return training.UIState{}, training.ErrNotFound
@@ -41,6 +42,10 @@ func (r *TrainingRepo) GetUIState(ctx context.Context, ownerID int64) (training.
 		return training.UIState{}, fmt.Errorf("select training UI state: %w", err)
 	}
 	state.Mode = training.InputMode(mode)
+	if pendingExerciseID.Valid {
+		value := pendingExerciseID.Int64
+		state.PendingExerciseID = &value
+	}
 	if len(pending) > 0 {
 		var preview training.ImportPreview
 		if err := json.Unmarshal(pending, &preview); err != nil {
@@ -61,15 +66,16 @@ func (r *TrainingRepo) SaveUIState(ctx context.Context, state training.UIState) 
 		}
 	}
 	const q = `
-		INSERT INTO training_ui_states (owner_id, chat_id, message_id, mode, pending_import, updated_at)
-		VALUES ($1, $2, $3, $4, $5::jsonb, now())
+		INSERT INTO training_ui_states (owner_id, chat_id, message_id, mode, pending_import, pending_exercise_id, updated_at)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
 		ON CONFLICT (owner_id) DO UPDATE SET
 			chat_id = EXCLUDED.chat_id,
 			message_id = EXCLUDED.message_id,
 			mode = EXCLUDED.mode,
 			pending_import = EXCLUDED.pending_import,
+			pending_exercise_id = EXCLUDED.pending_exercise_id,
 			updated_at = now()`
-	if _, err := r.pool.Exec(ctx, q, state.OwnerID, state.ChatID, state.MessageID, string(state.Mode), pending); err != nil {
+	if _, err := r.pool.Exec(ctx, q, state.OwnerID, state.ChatID, state.MessageID, string(state.Mode), pending, state.PendingExerciseID); err != nil {
 		return fmt.Errorf("upsert training UI state: %w", err)
 	}
 	return nil
@@ -137,10 +143,14 @@ func (r *TrainingRepo) ReplacePrograms(ctx context.Context, ownerID int64, progr
 			return fmt.Errorf("clear exercises for %q: %w", program.Name, err)
 		}
 		for j, exercise := range program.Exercises {
+			catalogID, catalogName, err := ensureTrainingExercise(ctx, tx, ownerID, exercise)
+			if err != nil {
+				return fmt.Errorf("ensure exercise %q: %w", exercise, err)
+			}
 			const insertExercise = `
-				INSERT INTO training_program_exercises (program_id, position, name)
-				VALUES ($1, $2, $3)`
-			if _, err := tx.Exec(ctx, insertExercise, programID, j+1, exercise); err != nil {
+				INSERT INTO training_program_exercises (program_id, position, name, exercise_id)
+				VALUES ($1, $2, $3, $4)`
+			if _, err := tx.Exec(ctx, insertExercise, programID, j+1, catalogName, catalogID); err != nil {
 				return fmt.Errorf("insert exercise %q: %w", exercise, err)
 			}
 		}
@@ -149,6 +159,212 @@ func (r *TrainingRepo) ReplacePrograms(ctx context.Context, ownerID int64, progr
 		return fmt.Errorf("commit program import: %w", err)
 	}
 	return nil
+}
+
+func (r *TrainingRepo) ListExercises(ctx context.Context, ownerID int64, limit, offset int) ([]training.Exercise, int, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 5
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM training_exercises WHERE owner_id = $1`, ownerID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count training exercises: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT e.id, e.owner_id, e.name,
+		       COALESCE(array_agg(DISTINCT p.name ORDER BY p.name) FILTER (WHERE p.id IS NOT NULL), '{}')
+		FROM training_exercises e
+		LEFT JOIN training_program_exercises pe ON pe.exercise_id = e.id
+		LEFT JOIN training_programs p ON p.id = pe.program_id
+		WHERE e.owner_id = $1
+		GROUP BY e.id
+		ORDER BY training_normalize_exercise_name(e.name), e.id
+		LIMIT $2 OFFSET $3`, ownerID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("select training exercises: %w", err)
+	}
+	defer rows.Close()
+	items := make([]training.Exercise, 0, limit)
+	for rows.Next() {
+		var item training.Exercise
+		if err := rows.Scan(&item.ID, &item.OwnerID, &item.Name, &item.Programs); err != nil {
+			return nil, 0, fmt.Errorf("scan training exercise: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate training exercises: %w", err)
+	}
+	return items, total, nil
+}
+
+func (r *TrainingRepo) SimilarExercises(ctx context.Context, ownerID int64, name string, limit int) ([]training.Exercise, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 5
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT e.id, e.owner_id, e.name,
+		       COALESCE(array_agg(DISTINCT p.name ORDER BY p.name) FILTER (WHERE p.id IS NOT NULL), '{}')
+		FROM training_exercises e
+		LEFT JOIN training_program_exercises pe ON pe.exercise_id = e.id
+		LEFT JOIN training_programs p ON p.id = pe.program_id
+		WHERE e.owner_id = $1
+		  AND (
+		      training_normalize_exercise_name(e.name) = training_normalize_exercise_name($2)
+		      OR training_normalize_exercise_name(e.name) LIKE '%' || training_normalize_exercise_name($2) || '%'
+		      OR training_normalize_exercise_name($2) LIKE '%' || training_normalize_exercise_name(e.name) || '%'
+		      OR EXISTS (
+		          SELECT 1
+		          FROM regexp_split_to_table(training_normalize_exercise_name($2), '\s+') token
+		          WHERE length(token) >= 4 AND training_normalize_exercise_name(e.name) LIKE '%' || token || '%'
+		      )
+		  )
+		GROUP BY e.id
+		ORDER BY (training_normalize_exercise_name(e.name) = training_normalize_exercise_name($2)) DESC,
+		         (training_normalize_exercise_name(e.name) LIKE '%' || training_normalize_exercise_name($2) || '%') DESC,
+		         training_normalize_exercise_name(e.name), e.id
+		LIMIT $3`, ownerID, name, limit)
+	if err != nil {
+		return nil, fmt.Errorf("select similar training exercises: %w", err)
+	}
+	defer rows.Close()
+	var items []training.Exercise
+	for rows.Next() {
+		var item training.Exercise
+		if err := rows.Scan(&item.ID, &item.OwnerID, &item.Name, &item.Programs); err != nil {
+			return nil, fmt.Errorf("scan similar training exercise: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate similar training exercises: %w", err)
+	}
+	return items, nil
+}
+
+func (r *TrainingRepo) Exercise(ctx context.Context, ownerID, exerciseID int64) (training.Exercise, error) {
+	var item training.Exercise
+	err := r.pool.QueryRow(ctx, `
+		SELECT e.id, e.owner_id, e.name,
+		       COALESCE(array_agg(DISTINCT p.name ORDER BY p.name) FILTER (WHERE p.id IS NOT NULL), '{}')
+		FROM training_exercises e
+		LEFT JOIN training_program_exercises pe ON pe.exercise_id = e.id
+		LEFT JOIN training_programs p ON p.id = pe.program_id
+		WHERE e.id = $1 AND e.owner_id = $2
+		GROUP BY e.id`, exerciseID, ownerID,
+	).Scan(&item.ID, &item.OwnerID, &item.Name, &item.Programs)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return training.Exercise{}, training.ErrNotFound
+	}
+	if err != nil {
+		return training.Exercise{}, fmt.Errorf("select training exercise: %w", err)
+	}
+	return item, nil
+}
+
+func (r *TrainingRepo) RenameExercise(ctx context.Context, ownerID, exerciseID int64, name string) (training.RenameResult, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return training.RenameResult{}, fmt.Errorf("begin rename exercise: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var currentName string
+	if err := tx.QueryRow(ctx, `
+		SELECT name FROM training_exercises WHERE id = $1 AND owner_id = $2 FOR UPDATE`, exerciseID, ownerID,
+	).Scan(&currentName); errors.Is(err, pgx.ErrNoRows) {
+		return training.RenameResult{}, training.ErrNotFound
+	} else if err != nil {
+		return training.RenameResult{}, fmt.Errorf("lock exercise to rename: %w", err)
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT DISTINCT s.id
+		FROM training_sessions s
+		JOIN training_session_exercises e ON e.session_id = s.id
+		WHERE s.owner_id = $1
+		  AND (e.exercise_id = $2 OR (e.exercise_id IS NULL AND training_normalize_exercise_name(e.name) = training_normalize_exercise_name($3)))
+		  AND s.published_chat_id IS NOT NULL AND s.published_message_id IS NOT NULL`, ownerID, exerciseID, currentName)
+	if err != nil {
+		return training.RenameResult{}, fmt.Errorf("select published sessions for rename: %w", err)
+	}
+	var publishedIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return training.RenameResult{}, fmt.Errorf("scan published session for rename: %w", err)
+		}
+		publishedIDs = append(publishedIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return training.RenameResult{}, fmt.Errorf("iterate published sessions for rename: %w", err)
+	}
+	rows.Close()
+
+	var targetID int64
+	var canonicalName string
+	err = tx.QueryRow(ctx, `
+		SELECT id, name
+		FROM training_exercises
+		WHERE owner_id = $1 AND training_normalize_exercise_name(name) = training_normalize_exercise_name($2) AND id <> $3
+		FOR UPDATE`, ownerID, name, exerciseID).Scan(&targetID, &canonicalName)
+	merged := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return training.RenameResult{}, fmt.Errorf("select rename target: %w", err)
+	}
+	if !merged {
+		targetID = exerciseID
+		canonicalName = name
+		if _, err := tx.Exec(ctx, `UPDATE training_exercises SET name = $1, updated_at = now() WHERE id = $2`, canonicalName, exerciseID); err != nil {
+			return training.RenameResult{}, fmt.Errorf("rename catalog exercise: %w", err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE training_program_exercises e
+		SET exercise_id = $1, name = $2
+		FROM training_programs p
+		WHERE p.id = e.program_id AND p.owner_id = $3
+		  AND (e.exercise_id = $4 OR (e.exercise_id IS NULL AND training_normalize_exercise_name(e.name) = training_normalize_exercise_name($5)))`,
+		targetID, canonicalName, ownerID, exerciseID, currentName,
+	); err != nil {
+		return training.RenameResult{}, fmt.Errorf("rename exercise in programs: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE training_session_exercises e
+		SET exercise_id = $1, name = $2
+		FROM training_sessions s
+		WHERE s.id = e.session_id AND s.owner_id = $3
+		  AND (e.exercise_id = $4 OR (e.exercise_id IS NULL AND training_normalize_exercise_name(e.name) = training_normalize_exercise_name($5)))`,
+		targetID, canonicalName, ownerID, exerciseID, currentName,
+	); err != nil {
+		return training.RenameResult{}, fmt.Errorf("rename exercise in sessions: %w", err)
+	}
+	if merged {
+		if _, err := tx.Exec(ctx, `DELETE FROM training_exercises WHERE id = $1`, exerciseID); err != nil {
+			return training.RenameResult{}, fmt.Errorf("remove merged exercise: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return training.RenameResult{}, fmt.Errorf("commit exercise rename: %w", err)
+	}
+
+	result := training.RenameResult{Merged: merged}
+	result.Exercise, err = r.Exercise(ctx, ownerID, targetID)
+	if err != nil {
+		return training.RenameResult{}, err
+	}
+	for _, id := range publishedIDs {
+		session, loadErr := r.loadSession(ctx, r.pool, ownerID, id)
+		if loadErr != nil {
+			return training.RenameResult{}, loadErr
+		}
+		result.PublishedSessions = append(result.PublishedSessions, session)
+	}
+	return result, nil
 }
 
 func (r *TrainingRepo) StartSession(ctx context.Context, ownerID, programID int64, now time.Time) (training.Session, error) {
@@ -179,8 +395,8 @@ func (r *TrainingRepo) StartSession(ctx context.Context, ownerID, programID int6
 		return training.Session{}, fmt.Errorf("insert training session: %w", err)
 	}
 	const copyExercises = `
-		INSERT INTO training_session_exercises (session_id, position, name)
-		SELECT $1, position, name
+		INSERT INTO training_session_exercises (session_id, position, name, exercise_id)
+		SELECT $1, position, name, exercise_id
 		FROM training_program_exercises
 		WHERE program_id = $2
 		ORDER BY position`
@@ -283,8 +499,10 @@ func (r *TrainingRepo) FinishCurrentExercise(ctx context.Context, ownerID int64,
 		ORDER BY position
 		LIMIT 1`, sessionID).Scan(&nextPosition)
 	if errors.Is(err, pgx.ErrNoRows) {
-		if _, err := tx.Exec(ctx,
-			`UPDATE training_sessions SET status = 'finished', finished_at = $1 WHERE id = $2`, now, sessionID,
+		if _, err := tx.Exec(ctx, `
+			UPDATE training_sessions
+			SET status = 'finished', finished_at = COALESCE(finished_at, $1)
+			WHERE id = $2`, now, sessionID,
 		); err != nil {
 			return training.Session{}, fmt.Errorf("finish training session: %w", err)
 		}
@@ -357,7 +575,7 @@ func (r *TrainingRepo) ReopenExercise(
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE training_sessions
-		SET status = 'active', current_position = $1, finished_at = NULL
+		SET status = 'active', current_position = $1
 		WHERE id = $2`, position, sessionID,
 	); err != nil {
 		if isUniqueViolation(err) {
@@ -390,7 +608,7 @@ func (r *TrainingRepo) PreviousExercise(
 			  AND s.started_at < (
 				SELECT started_at FROM training_sessions WHERE id = $2 AND owner_id = $1
 			  )
-			  AND lower(btrim(e.name)) = lower(btrim($3))
+			  AND training_normalize_exercise_name(e.name) = training_normalize_exercise_name($3)
 			  AND EXISTS (
 				SELECT 1 FROM training_sets candidate WHERE candidate.session_exercise_id = e.id
 			  )
@@ -433,29 +651,38 @@ func (r *TrainingRepo) PreviousExercise(
 	return previous, nil
 }
 
-func (r *TrainingRepo) RecentSessions(ctx context.Context, ownerID int64, limit int) ([]training.Session, error) {
+func (r *TrainingRepo) RecentSessions(ctx context.Context, ownerID int64, limit, offset int) ([]training.Session, int, error) {
 	if limit <= 0 || limit > 50 {
-		limit = 10
+		limit = 5
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := r.pool.QueryRow(ctx,
+		`SELECT count(*) FROM training_sessions WHERE owner_id = $1 AND status = 'finished'`, ownerID,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count training history: %w", err)
 	}
 	rows, err := r.pool.Query(ctx,
-		`SELECT id FROM training_sessions WHERE owner_id = $1 AND status = 'finished' ORDER BY started_at DESC LIMIT $2`,
-		ownerID, limit,
+		`SELECT id FROM training_sessions WHERE owner_id = $1 AND status = 'finished' ORDER BY started_at DESC, id DESC LIMIT $2 OFFSET $3`,
+		ownerID, limit, offset,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("select training history: %w", err)
+		return nil, 0, fmt.Errorf("select training history: %w", err)
 	}
 	var ids []int64
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			return nil, fmt.Errorf("scan training history ID: %w", err)
+			return nil, 0, fmt.Errorf("scan training history ID: %w", err)
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return nil, fmt.Errorf("iterate training history: %w", err)
+		return nil, 0, fmt.Errorf("iterate training history: %w", err)
 	}
 	rows.Close()
 
@@ -463,11 +690,11 @@ func (r *TrainingRepo) RecentSessions(ctx context.Context, ownerID int64, limit 
 	for _, id := range ids {
 		session, err := r.loadSession(ctx, r.pool, ownerID, id)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		sessions = append(sessions, session)
 	}
-	return sessions, nil
+	return sessions, total, nil
 }
 
 func (r *TrainingRepo) MarkPublished(ctx context.Context, ownerID, sessionID, chatID int64, messageID int) error {
@@ -542,7 +769,7 @@ func (r *TrainingRepo) loadSession(ctx context.Context, db trainingQuerier, owne
 	}
 
 	const exercisesQuery = `
-		SELECT e.id, e.position, e.name, e.note, e.complete,
+		SELECT e.id, e.exercise_id, e.position, e.name, e.note, e.complete,
 		       s.id, s.position, s.reps, s.weight_kg::double precision
 		FROM training_session_exercises e
 		LEFT JOIN training_sets s ON s.session_exercise_id = e.id
@@ -556,17 +783,22 @@ func (r *TrainingRepo) loadSession(ctx context.Context, db trainingQuerier, owne
 	indexes := make(map[int64]int)
 	for rows.Next() {
 		var exercise training.SessionExercise
+		var exerciseID pgtype.Int8
 		var setID pgtype.Int8
 		var setPosition, reps pgtype.Int4
 		var weight pgtype.Float8
 		if err := rows.Scan(
-			&exercise.ID, &exercise.Position, &exercise.Name, &exercise.Note, &exercise.Complete,
+			&exercise.ID, &exerciseID, &exercise.Position, &exercise.Name, &exercise.Note, &exercise.Complete,
 			&setID, &setPosition, &reps, &weight,
 		); err != nil {
 			return training.Session{}, fmt.Errorf("scan session exercise: %w", err)
 		}
 		index, ok := indexes[exercise.ID]
 		if !ok {
+			if exerciseID.Valid {
+				value := exerciseID.Int64
+				exercise.ExerciseID = &value
+			}
 			index = len(session.Exercises)
 			indexes[exercise.ID] = index
 			session.Exercises = append(session.Exercises, exercise)
@@ -584,6 +816,18 @@ func (r *TrainingRepo) loadSession(ctx context.Context, db trainingQuerier, owne
 		return training.Session{}, fmt.Errorf("iterate session exercises: %w", err)
 	}
 	return session, nil
+}
+
+func ensureTrainingExercise(ctx context.Context, tx pgx.Tx, ownerID int64, name string) (int64, string, error) {
+	var id int64
+	var canonicalName string
+	err := tx.QueryRow(ctx, `
+		INSERT INTO training_exercises (owner_id, name)
+		VALUES ($1, btrim($2))
+		ON CONFLICT (owner_id, (training_normalize_exercise_name(name))) DO UPDATE SET updated_at = training_exercises.updated_at
+		RETURNING id, name`, ownerID, name,
+	).Scan(&id, &canonicalName)
+	return id, canonicalName, err
 }
 
 func lockCurrentExercise(ctx context.Context, tx pgx.Tx, ownerID int64) (int64, int64, error) {

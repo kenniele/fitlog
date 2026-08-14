@@ -50,6 +50,7 @@ func (u *UseCase) OpenControlMessage(ctx context.Context, ownerID, chatID int64)
 	state.MessageID = 0
 	state.Mode = InputNone
 	state.PendingImport = nil
+	state.PendingExerciseID = nil
 	return u.repo.SaveUIState(ctx, state)
 }
 
@@ -62,6 +63,9 @@ func (u *UseCase) Expect(ctx context.Context, ownerID int64, mode InputMode) err
 	if mode != InputImportOK {
 		state.PendingImport = nil
 	}
+	if mode != InputRename {
+		state.PendingExerciseID = nil
+	}
 	return u.repo.SaveUIState(ctx, state)
 }
 
@@ -72,6 +76,7 @@ func (u *UseCase) ClearInput(ctx context.Context, ownerID int64) error {
 	}
 	state.Mode = InputNone
 	state.PendingImport = nil
+	state.PendingExerciseID = nil
 	return u.repo.SaveUIState(ctx, state)
 }
 
@@ -113,8 +118,181 @@ func (u *UseCase) ConfirmImport(ctx context.Context, ownerID int64) (ImportPrevi
 	return preview, nil
 }
 
+func (u *UseCase) BeginImportReview(ctx context.Context, ownerID int64) (ImportExerciseReview, error) {
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return ImportExerciseReview{}, err
+	}
+	if state.PendingImport == nil || len(state.PendingImport.Programs) == 0 {
+		return ImportExerciseReview{}, ErrNoPendingImport
+	}
+	state.Mode = InputImportOK
+	state.PendingImport.ReviewStarted = true
+	state.PendingImport.ReviewProgram = 0
+	state.PendingImport.ReviewExercise = 0
+	if err := u.repo.SaveUIState(ctx, state); err != nil {
+		return ImportExerciseReview{}, err
+	}
+	return u.importReview(ctx, ownerID, state)
+}
+
+func (u *UseCase) ImportReview(ctx context.Context, ownerID int64) (ImportExerciseReview, error) {
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return ImportExerciseReview{}, err
+	}
+	return u.importReview(ctx, ownerID, state)
+}
+
+func (u *UseCase) UseExistingImportExercise(ctx context.Context, ownerID, exerciseID int64) (ImportExerciseReview, bool, error) {
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return ImportExerciseReview{}, false, err
+	}
+	review, err := u.importReview(ctx, ownerID, state)
+	if err != nil {
+		return ImportExerciseReview{}, false, err
+	}
+	exercise, err := u.repo.Exercise(ctx, ownerID, exerciseID)
+	if err != nil {
+		return ImportExerciseReview{}, false, err
+	}
+	state.PendingImport.Programs[review.ProgramIndex].Exercises[review.ExerciseIndex] = exercise.Name
+	u.advanceImportReview(state.PendingImport)
+	if err := u.repo.SaveUIState(ctx, state); err != nil {
+		return ImportExerciseReview{}, false, err
+	}
+	if state.PendingImport.ReviewProgram >= len(state.PendingImport.Programs) {
+		return ImportExerciseReview{}, true, nil
+	}
+	next, err := u.importReview(ctx, ownerID, state)
+	return next, false, err
+}
+
+func (u *UseCase) KeepNewImportExercise(ctx context.Context, ownerID int64) (ImportExerciseReview, bool, error) {
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return ImportExerciseReview{}, false, err
+	}
+	if _, err := u.importReview(ctx, ownerID, state); err != nil {
+		return ImportExerciseReview{}, false, err
+	}
+	u.advanceImportReview(state.PendingImport)
+	if err := u.repo.SaveUIState(ctx, state); err != nil {
+		return ImportExerciseReview{}, false, err
+	}
+	if state.PendingImport.ReviewProgram >= len(state.PendingImport.Programs) {
+		return ImportExerciseReview{}, true, nil
+	}
+	next, err := u.importReview(ctx, ownerID, state)
+	return next, false, err
+}
+
+func (u *UseCase) importReview(ctx context.Context, ownerID int64, state UIState) (ImportExerciseReview, error) {
+	preview := state.PendingImport
+	if preview == nil || !preview.ReviewStarted || preview.ReviewProgram >= len(preview.Programs) {
+		return ImportExerciseReview{}, ErrNoPendingImport
+	}
+	program := preview.Programs[preview.ReviewProgram]
+	if preview.ReviewExercise >= len(program.Exercises) {
+		return ImportExerciseReview{}, ErrNoPendingImport
+	}
+	proposed := program.Exercises[preview.ReviewExercise]
+	similar, err := u.repo.SimilarExercises(ctx, ownerID, proposed, 5)
+	if err != nil {
+		return ImportExerciseReview{}, err
+	}
+	current := 0
+	total := 0
+	for i, item := range preview.Programs {
+		total += len(item.Exercises)
+		if i < preview.ReviewProgram {
+			current += len(item.Exercises)
+		}
+	}
+	current += preview.ReviewExercise + 1
+	return ImportExerciseReview{
+		ProgramIndex: preview.ReviewProgram, ExerciseIndex: preview.ReviewExercise,
+		Current: current, Total: total, ProgramName: program.Name,
+		ProposedName: proposed, Similar: similar,
+	}, nil
+}
+
+func (u *UseCase) advanceImportReview(preview *ImportPreview) {
+	preview.ReviewExercise++
+	for preview.ReviewProgram < len(preview.Programs) && preview.ReviewExercise >= len(preview.Programs[preview.ReviewProgram].Exercises) {
+		preview.ReviewProgram++
+		preview.ReviewExercise = 0
+	}
+}
+
 func (u *UseCase) Programs(ctx context.Context, ownerID int64) ([]Program, error) {
 	return u.repo.ListPrograms(ctx, ownerID)
+}
+
+func (u *UseCase) Exercises(ctx context.Context, ownerID int64, page, pageSize int) (ExercisePage, error) {
+	if page < 1 || pageSize < 1 || pageSize > 20 {
+		return ExercisePage{}, ErrInvalidPage
+	}
+	items, total, err := u.repo.ListExercises(ctx, ownerID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return ExercisePage{}, err
+	}
+	totalPages := (total + pageSize - 1) / pageSize
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		return ExercisePage{}, ErrInvalidPage
+	}
+	return ExercisePage{Items: items, Page: page, PageSize: pageSize, TotalItems: total, TotalPages: totalPages}, nil
+}
+
+func (u *UseCase) Exercise(ctx context.Context, ownerID, exerciseID int64) (Exercise, error) {
+	return u.repo.Exercise(ctx, ownerID, exerciseID)
+}
+
+func (u *UseCase) ExpectExerciseRename(ctx context.Context, ownerID, exerciseID int64) (Exercise, error) {
+	exercise, err := u.repo.Exercise(ctx, ownerID, exerciseID)
+	if err != nil {
+		return Exercise{}, err
+	}
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return Exercise{}, err
+	}
+	state.Mode = InputRename
+	state.PendingImport = nil
+	state.PendingExerciseID = &exerciseID
+	if err := u.repo.SaveUIState(ctx, state); err != nil {
+		return Exercise{}, err
+	}
+	return exercise, nil
+}
+
+func (u *UseCase) RenameExercise(ctx context.Context, ownerID int64, raw string) (RenameResult, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return RenameResult{}, fmt.Errorf("название пустое")
+	}
+	if len([]rune(name)) > 200 {
+		return RenameResult{}, fmt.Errorf("название длиннее 200 символов")
+	}
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return RenameResult{}, err
+	}
+	if state.Mode != InputRename || state.PendingExerciseID == nil {
+		return RenameResult{}, ErrNotEditable
+	}
+	result, err := u.repo.RenameExercise(ctx, ownerID, *state.PendingExerciseID, name)
+	if err != nil {
+		return RenameResult{}, err
+	}
+	if err := u.ClearInput(ctx, ownerID); err != nil {
+		return RenameResult{}, err
+	}
+	return result, nil
 }
 
 func (u *UseCase) Start(ctx context.Context, ownerID, programID int64, now time.Time) (Session, error) {
@@ -192,8 +370,22 @@ func (u *UseCase) Session(ctx context.Context, ownerID, sessionID int64) (Sessio
 	return u.repo.Session(ctx, ownerID, sessionID)
 }
 
-func (u *UseCase) Recent(ctx context.Context, ownerID int64, limit int) ([]Session, error) {
-	return u.repo.RecentSessions(ctx, ownerID, limit)
+func (u *UseCase) History(ctx context.Context, ownerID int64, page, pageSize int) (SessionPage, error) {
+	if page < 1 || pageSize < 1 || pageSize > 20 {
+		return SessionPage{}, ErrInvalidPage
+	}
+	items, total, err := u.repo.RecentSessions(ctx, ownerID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return SessionPage{}, err
+	}
+	totalPages := (total + pageSize - 1) / pageSize
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		return SessionPage{}, ErrInvalidPage
+	}
+	return SessionPage{Items: items, Page: page, PageSize: pageSize, TotalItems: total, TotalPages: totalPages}, nil
 }
 
 func (u *UseCase) MarkPublished(ctx context.Context, ownerID, sessionID, chatID int64, messageID int) error {

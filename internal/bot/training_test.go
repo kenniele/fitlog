@@ -25,6 +25,19 @@ func TestTrainingPairRoundTrip(t *testing.T) {
 	require.LessOrEqual(t, len("\f"+trainingCallbackPublishChannel+"|"+payload), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackConfirmDelete+"|"+maxID), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackDeleteLocal+"|"+maxID), 64)
+	require.LessOrEqual(t, len("\f"+trainingCallbackRenameExercise+"|"+payload), 64)
+	require.LessOrEqual(t, len("\f"+trainingCallbackImportExisting+"|"+maxID), 64)
+}
+
+func TestParseTrainingPage(t *testing.T) {
+	page, err := parseTrainingPage("")
+	require.NoError(t, err)
+	require.Equal(t, 1, page)
+	page, err = parseTrainingPage("2")
+	require.NoError(t, err)
+	require.Equal(t, 2, page)
+	_, err = parseTrainingPage("0")
+	require.Error(t, err)
 }
 
 func TestParseTrainingPairRejectsInvalidPayload(t *testing.T) {

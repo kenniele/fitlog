@@ -24,6 +24,7 @@ func FormatActiveCard(session Session, previous *PreviousExercise, loc *time.Loc
 	}
 	var out strings.Builder
 	fmt.Fprintf(&out, "<b>🏋️ %s</b>\n", html.EscapeString(session.ProgramName))
+	fmt.Fprintf(&out, "Начало: %s\n", session.StartedAt.In(loc).Format("15:04"))
 	fmt.Fprintf(&out, "Упражнение %d из %d\n\n", exercise.Position, len(session.Exercises))
 	fmt.Fprintf(&out, "<b>%s</b>\n", html.EscapeString(exercise.Name))
 	if previous != nil && len(previous.Sets) > 0 {
@@ -54,6 +55,12 @@ func FormatFinished(session Session, loc *time.Location) string {
 	var out strings.Builder
 	out.WriteString("<b>🏋️ Эффект Гоггинса</b>\n")
 	fmt.Fprintf(&out, "%s · %s\n", day, html.EscapeString(session.ProgramName))
+	if session.FinishedAt != nil {
+		fmt.Fprintf(&out, "Начало: %s · Конец: %s\n",
+			session.StartedAt.In(loc).Format("15:04"), session.FinishedAt.In(loc).Format("15:04"),
+		)
+		fmt.Fprintf(&out, "Длительность: %s\n", FormatSessionDuration(session))
+	}
 	for _, exercise := range session.Exercises {
 		out.WriteString("\n<b>" + html.EscapeString(exercise.Name) + "</b>\n")
 		if len(exercise.Sets) == 0 {
@@ -81,4 +88,24 @@ func FormatFinished(session Session, loc *time.Location) string {
 		fmt.Fprintf(&out, " · Пропусков: %d", skipped)
 	}
 	return strings.TrimSpace(out.String())
+}
+
+func FormatSessionDuration(session Session) string {
+	if session.FinishedAt == nil || session.FinishedAt.Before(session.StartedAt) {
+		return "—"
+	}
+	duration := session.FinishedAt.Sub(session.StartedAt).Round(time.Minute)
+	if duration < time.Minute {
+		return "менее минуты"
+	}
+	hours := int(duration / time.Hour)
+	minutes := int(duration%time.Hour) / int(time.Minute)
+	switch {
+	case hours > 0 && minutes > 0:
+		return fmt.Sprintf("%d ч %d мин", hours, minutes)
+	case hours > 0:
+		return fmt.Sprintf("%d ч", hours)
+	default:
+		return fmt.Sprintf("%d мин", minutes)
+	}
 }
