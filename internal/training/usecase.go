@@ -51,6 +51,7 @@ func (u *UseCase) OpenControlMessage(ctx context.Context, ownerID, chatID int64)
 	state.Mode = InputNone
 	state.PendingImport = nil
 	state.PendingExerciseID = nil
+	state.PendingExerciseName = ""
 	return u.repo.SaveUIState(ctx, state)
 }
 
@@ -65,6 +66,7 @@ func (u *UseCase) Expect(ctx context.Context, ownerID int64, mode InputMode) err
 	}
 	if mode != InputRename {
 		state.PendingExerciseID = nil
+		state.PendingExerciseName = ""
 	}
 	return u.repo.SaveUIState(ctx, state)
 }
@@ -77,6 +79,7 @@ func (u *UseCase) ClearInput(ctx context.Context, ownerID int64) error {
 	state.Mode = InputNone
 	state.PendingImport = nil
 	state.PendingExerciseID = nil
+	state.PendingExerciseName = ""
 	return u.repo.SaveUIState(ctx, state)
 }
 
@@ -264,28 +267,51 @@ func (u *UseCase) ExpectExerciseRename(ctx context.Context, ownerID, exerciseID 
 	state.Mode = InputRename
 	state.PendingImport = nil
 	state.PendingExerciseID = &exerciseID
+	state.PendingExerciseName = ""
 	if err := u.repo.SaveUIState(ctx, state); err != nil {
 		return Exercise{}, err
 	}
 	return exercise, nil
 }
 
-func (u *UseCase) RenameExercise(ctx context.Context, ownerID int64, raw string) (RenameResult, error) {
+func (u *UseCase) PrepareExerciseRename(ctx context.Context, ownerID int64, raw string) (RenamePreview, error) {
 	name := strings.TrimSpace(raw)
 	if name == "" {
-		return RenameResult{}, fmt.Errorf("название пустое")
+		return RenamePreview{}, fmt.Errorf("название пустое")
 	}
 	if len([]rune(name)) > 200 {
-		return RenameResult{}, fmt.Errorf("название длиннее 200 символов")
+		return RenamePreview{}, fmt.Errorf("название длиннее 200 символов")
 	}
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return RenamePreview{}, err
+	}
+	if state.Mode != InputRename || state.PendingExerciseID == nil {
+		return RenamePreview{}, ErrNotEditable
+	}
+	exercise, err := u.repo.Exercise(ctx, ownerID, *state.PendingExerciseID)
+	if err != nil {
+		return RenamePreview{}, err
+	}
+	state.Mode = InputRenameOK
+	state.PendingExerciseName = name
+	if err := u.repo.SaveUIState(ctx, state); err != nil {
+		return RenamePreview{}, err
+	}
+	return RenamePreview{Exercise: exercise, NewName: name}, nil
+}
+
+func (u *UseCase) ConfirmExerciseRename(ctx context.Context, ownerID int64, replaceHistory bool) (RenameResult, error) {
 	state, err := u.State(ctx, ownerID)
 	if err != nil {
 		return RenameResult{}, err
 	}
-	if state.Mode != InputRename || state.PendingExerciseID == nil {
+	if state.Mode != InputRenameOK || state.PendingExerciseID == nil || state.PendingExerciseName == "" {
 		return RenameResult{}, ErrNotEditable
 	}
-	result, err := u.repo.RenameExercise(ctx, ownerID, *state.PendingExerciseID, name)
+	result, err := u.repo.RenameExercise(
+		ctx, ownerID, *state.PendingExerciseID, state.PendingExerciseName, replaceHistory,
+	)
 	if err != nil {
 		return RenameResult{}, err
 	}

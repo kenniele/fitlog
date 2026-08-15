@@ -18,6 +18,7 @@ type stateRepository struct {
 	renameResult     RenameResult
 	renamedID        int64
 	renamedName      string
+	replacedHistory  bool
 }
 
 func (r *stateRepository) GetUIState(context.Context, int64) (UIState, error) {
@@ -53,9 +54,16 @@ func (r *stateRepository) Exercise(_ context.Context, _ int64, exerciseID int64)
 	return Exercise{}, ErrNotFound
 }
 
-func (r *stateRepository) RenameExercise(_ context.Context, _ int64, exerciseID int64, name string) (RenameResult, error) {
+func (r *stateRepository) RenameExercise(
+	_ context.Context,
+	_ int64,
+	exerciseID int64,
+	name string,
+	replaceHistory bool,
+) (RenameResult, error) {
 	r.renamedID = exerciseID
 	r.renamedName = name
+	r.replacedHistory = replaceHistory
 	return r.renameResult, nil
 }
 
@@ -144,19 +152,48 @@ func TestImportReviewReplacesOnlySelectedExercise(t *testing.T) {
 	require.True(t, done)
 }
 
-func TestRenameExerciseClearsRenameState(t *testing.T) {
+func TestExerciseRenameRequiresScopeConfirmation(t *testing.T) {
 	exerciseID := int64(7)
 	repo := &stateRepository{
 		state:        UIState{OwnerID: 42, Mode: InputRename, PendingExerciseID: &exerciseID},
+		exercises:    []Exercise{{ID: exerciseID, OwnerID: 42, Name: "Старая тяга"}},
 		renameResult: RenameResult{Exercise: Exercise{ID: exerciseID, Name: "Новая тяга"}},
 	}
+	usecase := NewUseCase(repo)
 
-	result, err := NewUseCase(repo).RenameExercise(context.Background(), 42, "  Новая тяга  ")
+	preview, err := usecase.PrepareExerciseRename(context.Background(), 42, "  Новая тяга  ")
+
+	require.NoError(t, err)
+	require.Equal(t, "Старая тяга", preview.Exercise.Name)
+	require.Equal(t, "Новая тяга", preview.NewName)
+	require.Equal(t, InputRenameOK, repo.state.Mode)
+	require.Equal(t, "Новая тяга", repo.state.PendingExerciseName)
+	require.Zero(t, repo.renamedID, "rename must wait for the scope button")
+
+	result, err := usecase.ConfirmExerciseRename(context.Background(), 42, false)
 
 	require.NoError(t, err)
 	require.Equal(t, exerciseID, repo.renamedID)
 	require.Equal(t, "Новая тяга", repo.renamedName)
+	require.False(t, repo.replacedHistory)
 	require.Equal(t, "Новая тяга", result.Exercise.Name)
 	require.Equal(t, InputNone, repo.state.Mode)
 	require.Nil(t, repo.state.PendingExerciseID)
+	require.Empty(t, repo.state.PendingExerciseName)
+}
+
+func TestExerciseRenameCanReplaceHistory(t *testing.T) {
+	exerciseID := int64(7)
+	repo := &stateRepository{
+		state: UIState{
+			OwnerID: 42, Mode: InputRenameOK, PendingExerciseID: &exerciseID,
+			PendingExerciseName: "Новая тяга",
+		},
+		renameResult: RenameResult{Exercise: Exercise{ID: exerciseID, Name: "Новая тяга"}},
+	}
+
+	_, err := NewUseCase(repo).ConfirmExerciseRename(context.Background(), 42, true)
+
+	require.NoError(t, err)
+	require.True(t, repo.replacedHistory)
 }

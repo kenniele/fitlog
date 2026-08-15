@@ -63,13 +63,14 @@ func TestTrainingRepo_Integration(t *testing.T) {
 	require.Equal(t, "Тяга", similar[0].Name)
 	pendingExerciseID := similar[0].ID
 	require.NoError(t, repo.SaveUIState(ctx, training.UIState{
-		OwnerID: ownerID, ChatID: ownerID, MessageID: 123, Mode: training.InputRename,
-		PendingExerciseID: &pendingExerciseID,
+		OwnerID: ownerID, ChatID: ownerID, MessageID: 123, Mode: training.InputRenameOK,
+		PendingExerciseID: &pendingExerciseID, PendingExerciseName: "Новая тяга",
 	}))
 	state, err = repo.GetUIState(ctx, ownerID)
 	require.NoError(t, err)
-	require.Equal(t, training.InputRename, state.Mode)
+	require.Equal(t, training.InputRenameOK, state.Mode)
 	require.Equal(t, pendingExerciseID, *state.PendingExerciseID)
+	require.Equal(t, "Новая тяга", state.PendingExerciseName)
 
 	startedAt := time.Now().UTC().Truncate(time.Microsecond)
 	session, err := repo.StartSession(ctx, ownerID, programs[0].ID, startedAt)
@@ -190,7 +191,7 @@ func TestTrainingRepo_Integration(t *testing.T) {
 		}
 	}
 	require.NotZero(t, pull.ID)
-	rename, err := repo.RenameExercise(ctx, ownerID, pull.ID, "Тяга верхнего блока")
+	rename, err := repo.RenameExercise(ctx, ownerID, pull.ID, "Тяга верхнего блока", true)
 	require.NoError(t, err)
 	require.False(t, rename.Merged)
 	require.Equal(t, "Тяга верхнего блока", rename.Exercise.Name)
@@ -201,17 +202,24 @@ func TestTrainingRepo_Integration(t *testing.T) {
 	loaded, err = repo.Session(ctx, ownerID, firstSession.ID)
 	require.NoError(t, err)
 	require.Equal(t, "Тяга верхнего блока", loaded.Exercises[0].Name)
-	merged, err := repo.RenameExercise(ctx, ownerID, rename.Exercise.ID, "отжимания")
+	merged, err := repo.RenameExercise(ctx, ownerID, rename.Exercise.ID, "отжимания", false)
 	require.NoError(t, err)
 	require.True(t, merged.Merged)
 	require.Equal(t, "Отжимания", merged.Exercise.Name)
+	require.Empty(t, merged.PublishedSessions)
 	programs, err = repo.ListPrograms(ctx, ownerID)
 	require.NoError(t, err)
 	require.Equal(t, []string{"Отжимания", "Отжимания"}, programs[0].Exercises)
+	loaded, err = repo.Session(ctx, ownerID, firstSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Тяга верхнего блока", loaded.Exercises[0].Name)
+	loaded, err = repo.Session(ctx, ownerID, second.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Тяга верхнего блока", loaded.Exercises[0].Name)
 	catalog, totalExercises, err = repo.ListExercises(ctx, ownerID, 5, 0)
 	require.NoError(t, err)
-	require.Equal(t, 1, totalExercises)
-	require.Len(t, catalog, 1)
+	require.Equal(t, 2, totalExercises)
+	require.Len(t, catalog, 2)
 
 	require.ErrorIs(t, repo.DeleteSession(ctx, ownerID+1, second.ID), training.ErrNotFound)
 	require.NoError(t, repo.DeleteSession(ctx, ownerID, second.ID))

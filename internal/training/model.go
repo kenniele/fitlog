@@ -30,6 +30,7 @@ const (
 	InputImportFile InputMode = "import_file"
 	InputImportOK   InputMode = "import_preview"
 	InputRename     InputMode = "exercise_rename"
+	InputRenameOK   InputMode = "exercise_rename_confirm"
 )
 
 // ProgramInput is the normalized representation produced by a TXT or CSV
@@ -93,6 +94,11 @@ type RenameResult struct {
 	PublishedSessions []Session
 }
 
+type RenamePreview struct {
+	Exercise Exercise
+	NewName  string
+}
+
 // SetInput is the structured meaning of either "12Р 40КГ" or "12Р -".
 // A nil WeightKG means bodyweight.
 type SetInput struct {
@@ -149,12 +155,13 @@ func (s Session) CurrentExercise() *SessionExercise {
 }
 
 type UIState struct {
-	OwnerID           int64
-	ChatID            int64
-	MessageID         int
-	Mode              InputMode
-	PendingImport     *ImportPreview
-	PendingExerciseID *int64
+	OwnerID             int64
+	ChatID              int64
+	MessageID           int
+	Mode                InputMode
+	PendingImport       *ImportPreview
+	PendingExerciseID   *int64
+	PendingExerciseName string
 }
 
 // Repository persists all durable workout and card state. The PostgreSQL
@@ -167,7 +174,7 @@ type Repository interface {
 	ListExercises(ctx context.Context, ownerID int64, limit, offset int) ([]Exercise, int, error)
 	SimilarExercises(ctx context.Context, ownerID int64, name string, limit int) ([]Exercise, error)
 	Exercise(ctx context.Context, ownerID, exerciseID int64) (Exercise, error)
-	RenameExercise(ctx context.Context, ownerID, exerciseID int64, name string) (RenameResult, error)
+	RenameExercise(ctx context.Context, ownerID, exerciseID int64, name string, replaceHistory bool) (RenameResult, error)
 	StartSession(ctx context.Context, ownerID, programID int64, now time.Time) (Session, error)
 	ActiveSession(ctx context.Context, ownerID int64) (Session, error)
 	Session(ctx context.Context, ownerID, sessionID int64) (Session, error)

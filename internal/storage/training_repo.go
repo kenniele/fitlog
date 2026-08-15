@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,7 +26,7 @@ func NewTrainingRepo(pool *pgxpool.Pool) *TrainingRepo {
 
 func (r *TrainingRepo) GetUIState(ctx context.Context, ownerID int64) (training.UIState, error) {
 	const q = `
-		SELECT owner_id, chat_id, message_id, mode, pending_import, pending_exercise_id
+		SELECT owner_id, chat_id, message_id, mode, pending_import, pending_exercise_id, pending_exercise_name
 		FROM training_ui_states
 		WHERE owner_id = $1`
 	var state training.UIState
@@ -33,7 +34,7 @@ func (r *TrainingRepo) GetUIState(ctx context.Context, ownerID int64) (training.
 	var pending []byte
 	var pendingExerciseID pgtype.Int8
 	err := r.pool.QueryRow(ctx, q, ownerID).Scan(
-		&state.OwnerID, &state.ChatID, &state.MessageID, &mode, &pending, &pendingExerciseID,
+		&state.OwnerID, &state.ChatID, &state.MessageID, &mode, &pending, &pendingExerciseID, &state.PendingExerciseName,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return training.UIState{}, training.ErrNotFound
@@ -66,16 +67,17 @@ func (r *TrainingRepo) SaveUIState(ctx context.Context, state training.UIState) 
 		}
 	}
 	const q = `
-		INSERT INTO training_ui_states (owner_id, chat_id, message_id, mode, pending_import, pending_exercise_id, updated_at)
-		VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
+		INSERT INTO training_ui_states (owner_id, chat_id, message_id, mode, pending_import, pending_exercise_id, pending_exercise_name, updated_at)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, now())
 		ON CONFLICT (owner_id) DO UPDATE SET
 			chat_id = EXCLUDED.chat_id,
 			message_id = EXCLUDED.message_id,
 			mode = EXCLUDED.mode,
 			pending_import = EXCLUDED.pending_import,
 			pending_exercise_id = EXCLUDED.pending_exercise_id,
+			pending_exercise_name = EXCLUDED.pending_exercise_name,
 			updated_at = now()`
-	if _, err := r.pool.Exec(ctx, q, state.OwnerID, state.ChatID, state.MessageID, string(state.Mode), pending, state.PendingExerciseID); err != nil {
+	if _, err := r.pool.Exec(ctx, q, state.OwnerID, state.ChatID, state.MessageID, string(state.Mode), pending, state.PendingExerciseID, state.PendingExerciseName); err != nil {
 		return fmt.Errorf("upsert training UI state: %w", err)
 	}
 	return nil
@@ -264,7 +266,12 @@ func (r *TrainingRepo) Exercise(ctx context.Context, ownerID, exerciseID int64) 
 	return item, nil
 }
 
-func (r *TrainingRepo) RenameExercise(ctx context.Context, ownerID, exerciseID int64, name string) (training.RenameResult, error) {
+func (r *TrainingRepo) RenameExercise(
+	ctx context.Context,
+	ownerID, exerciseID int64,
+	name string,
+	replaceHistory bool,
+) (training.RenameResult, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return training.RenameResult{}, fmt.Errorf("begin rename exercise: %w", err)
@@ -280,30 +287,32 @@ func (r *TrainingRepo) RenameExercise(ctx context.Context, ownerID, exerciseID i
 		return training.RenameResult{}, fmt.Errorf("lock exercise to rename: %w", err)
 	}
 
-	rows, err := tx.Query(ctx, `
-		SELECT DISTINCT s.id
-		FROM training_sessions s
-		JOIN training_session_exercises e ON e.session_id = s.id
-		WHERE s.owner_id = $1
-		  AND (e.exercise_id = $2 OR (e.exercise_id IS NULL AND training_normalize_exercise_name(e.name) = training_normalize_exercise_name($3)))
-		  AND s.published_chat_id IS NOT NULL AND s.published_message_id IS NOT NULL`, ownerID, exerciseID, currentName)
-	if err != nil {
-		return training.RenameResult{}, fmt.Errorf("select published sessions for rename: %w", err)
-	}
 	var publishedIDs []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return training.RenameResult{}, fmt.Errorf("scan published session for rename: %w", err)
+	if replaceHistory {
+		rows, err := tx.Query(ctx, `
+			SELECT DISTINCT s.id
+			FROM training_sessions s
+			JOIN training_session_exercises e ON e.session_id = s.id
+			WHERE s.owner_id = $1
+			  AND (e.exercise_id = $2 OR (e.exercise_id IS NULL AND training_normalize_exercise_name(e.name) = training_normalize_exercise_name($3)))
+			  AND s.published_chat_id IS NOT NULL AND s.published_message_id IS NOT NULL`, ownerID, exerciseID, currentName)
+		if err != nil {
+			return training.RenameResult{}, fmt.Errorf("select published sessions for rename: %w", err)
 		}
-		publishedIDs = append(publishedIDs, id)
-	}
-	if err := rows.Err(); err != nil {
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return training.RenameResult{}, fmt.Errorf("scan published session for rename: %w", err)
+			}
+			publishedIDs = append(publishedIDs, id)
+		}
+		err = rows.Err()
 		rows.Close()
-		return training.RenameResult{}, fmt.Errorf("iterate published sessions for rename: %w", err)
+		if err != nil {
+			return training.RenameResult{}, fmt.Errorf("iterate published sessions for rename: %w", err)
+		}
 	}
-	rows.Close()
 
 	var targetID int64
 	var canonicalName string
@@ -317,10 +326,18 @@ func (r *TrainingRepo) RenameExercise(ctx context.Context, ownerID, exerciseID i
 		return training.RenameResult{}, fmt.Errorf("select rename target: %w", err)
 	}
 	if !merged {
-		targetID = exerciseID
 		canonicalName = name
-		if _, err := tx.Exec(ctx, `UPDATE training_exercises SET name = $1, updated_at = now() WHERE id = $2`, canonicalName, exerciseID); err != nil {
-			return training.RenameResult{}, fmt.Errorf("rename catalog exercise: %w", err)
+		if replaceHistory || strings.EqualFold(strings.TrimSpace(currentName), name) {
+			targetID = exerciseID
+			if _, err := tx.Exec(ctx, `UPDATE training_exercises SET name = $1, updated_at = now() WHERE id = $2`, canonicalName, exerciseID); err != nil {
+				return training.RenameResult{}, fmt.Errorf("rename catalog exercise: %w", err)
+			}
+		} else {
+			if err := tx.QueryRow(ctx, `
+				INSERT INTO training_exercises (owner_id, name) VALUES ($1, $2)
+				RETURNING id, name`, ownerID, canonicalName).Scan(&targetID, &canonicalName); err != nil {
+				return training.RenameResult{}, fmt.Errorf("create replacement exercise: %w", err)
+			}
 		}
 	}
 	if _, err := tx.Exec(ctx, `
@@ -333,18 +350,24 @@ func (r *TrainingRepo) RenameExercise(ctx context.Context, ownerID, exerciseID i
 	); err != nil {
 		return training.RenameResult{}, fmt.Errorf("rename exercise in programs: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE training_session_exercises e
-		SET exercise_id = $1, name = $2
-		FROM training_sessions s
-		WHERE s.id = e.session_id AND s.owner_id = $3
-		  AND (e.exercise_id = $4 OR (e.exercise_id IS NULL AND training_normalize_exercise_name(e.name) = training_normalize_exercise_name($5)))`,
-		targetID, canonicalName, ownerID, exerciseID, currentName,
-	); err != nil {
-		return training.RenameResult{}, fmt.Errorf("rename exercise in sessions: %w", err)
+	if replaceHistory {
+		if _, err := tx.Exec(ctx, `
+			UPDATE training_session_exercises e
+			SET exercise_id = $1, name = $2
+			FROM training_sessions s
+			WHERE s.id = e.session_id AND s.owner_id = $3
+			  AND (e.exercise_id = $4 OR (e.exercise_id IS NULL AND training_normalize_exercise_name(e.name) = training_normalize_exercise_name($5)))`,
+			targetID, canonicalName, ownerID, exerciseID, currentName,
+		); err != nil {
+			return training.RenameResult{}, fmt.Errorf("rename exercise in sessions: %w", err)
+		}
 	}
-	if merged {
-		if _, err := tx.Exec(ctx, `DELETE FROM training_exercises WHERE id = $1`, exerciseID); err != nil {
+	if targetID != exerciseID {
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM training_exercises old
+			WHERE old.id = $1
+			  AND NOT EXISTS (SELECT 1 FROM training_program_exercises WHERE exercise_id = old.id)
+			  AND NOT EXISTS (SELECT 1 FROM training_session_exercises WHERE exercise_id = old.id)`, exerciseID); err != nil {
 			return training.RenameResult{}, fmt.Errorf("remove merged exercise: %w", err)
 		}
 	}
