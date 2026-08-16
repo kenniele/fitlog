@@ -18,34 +18,39 @@ import (
 )
 
 const (
-	trainingCallbackHome           = "training_home"
-	trainingCallbackStart          = "training_start"
-	trainingCallbackContinue       = "training_continue"
-	trainingCallbackProgram        = "training_program"
-	trainingCallbackAddSet         = "training_add_set"
-	trainingCallbackFinishExercise = "training_finish_exercise"
-	trainingCallbackNote           = "training_note"
-	trainingCallbackPrograms       = "training_programs"
-	trainingCallbackExercises      = "training_exercises"
-	trainingCallbackExercise       = "training_exercise"
-	trainingCallbackRenameExercise = "training_ex_rename"
-	trainingCallbackRenamePrograms = "training_rename_programs"
-	trainingCallbackRenameChannels = "training_rename_channels"
-	trainingCallbackImport         = "training_import"
-	trainingCallbackConfirmImport  = "training_confirm_import"
-	trainingCallbackImportExisting = "training_import_existing"
-	trainingCallbackImportNew      = "training_import_new"
-	trainingCallbackHistory        = "training_history"
-	trainingCallbackHistorySession = "training_history_session"
-	trainingCallbackPublish        = "training_publish"
-	trainingCallbackPublishChannel = "tr_publish_channel"
-	trainingCallbackEdit           = "training_edit"
-	trainingCallbackReopen         = "training_reopen"
-	trainingCallbackEditBack       = "training_edit_back"
-	trainingCallbackDelete         = "training_delete"
-	trainingCallbackConfirmDelete  = "training_delete_confirm"
-	trainingCallbackDeleteLocal    = "training_delete_local"
-	trainingCallbackSaveOnly       = "training_save_only"
+	trainingCallbackHome                    = "training_home"
+	trainingCallbackStart                   = "training_start"
+	trainingCallbackContinue                = "training_continue"
+	trainingCallbackProgram                 = "training_program"
+	trainingCallbackAddSet                  = "training_add_set"
+	trainingCallbackFinishExercise          = "training_finish_exercise"
+	trainingCallbackNote                    = "training_note"
+	trainingCallbackPrograms                = "training_programs"
+	trainingCallbackExercises               = "training_exercises"
+	trainingCallbackExercise                = "training_exercise"
+	trainingCallbackRenameExercise          = "training_ex_rename"
+	trainingCallbackProgramView             = "training_program_view"
+	trainingCallbackProgramExercise         = "training_program_ex"
+	trainingCallbackProgramExercisePage     = "training_program_ex_page"
+	trainingCallbackProgramExerciseExisting = "tr_program_ex_existing"
+	trainingCallbackProgramExerciseNew      = "tr_program_ex_new"
+	trainingCallbackProgramExerciseOnly     = "tr_program_ex_only"
+	trainingCallbackProgramExerciseHistory  = "tr_program_ex_history"
+	trainingCallbackImport                  = "training_import"
+	trainingCallbackConfirmImport           = "training_confirm_import"
+	trainingCallbackImportExisting          = "training_import_existing"
+	trainingCallbackImportNew               = "training_import_new"
+	trainingCallbackHistory                 = "training_history"
+	trainingCallbackHistorySession          = "training_history_session"
+	trainingCallbackPublish                 = "training_publish"
+	trainingCallbackPublishChannel          = "tr_publish_channel"
+	trainingCallbackEdit                    = "training_edit"
+	trainingCallbackReopen                  = "training_reopen"
+	trainingCallbackEditBack                = "training_edit_back"
+	trainingCallbackDelete                  = "training_delete"
+	trainingCallbackConfirmDelete           = "training_delete_confirm"
+	trainingCallbackDeleteLocal             = "training_delete_local"
+	trainingCallbackSaveOnly                = "training_save_only"
 
 	maxTrainingImportBytes = 1 << 20
 	trainingPageSize       = 5
@@ -64,8 +69,13 @@ func (b *Bot) registerTrainingHandlers() {
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackExercises}, b.handleTrainingExercises, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackExercise}, b.handleTrainingExercise, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackRenameExercise}, b.handleTrainingRenameExercise, currentCard)
-	b.b.Handle(&tele.Btn{Unique: trainingCallbackRenamePrograms}, b.handleTrainingRenamePrograms, currentCard)
-	b.b.Handle(&tele.Btn{Unique: trainingCallbackRenameChannels}, b.handleTrainingRenameChannels, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackProgramView}, b.handleTrainingProgramView, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackProgramExercise}, b.handleTrainingProgramExercise, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackProgramExercisePage}, b.handleTrainingProgramExercisePage, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackProgramExerciseExisting}, b.handleTrainingProgramExerciseExisting, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackProgramExerciseNew}, b.handleTrainingProgramExerciseNew, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackProgramExerciseOnly}, b.handleTrainingProgramExerciseOnly, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackProgramExerciseHistory}, b.handleTrainingProgramExerciseHistory, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackImport}, b.handleTrainingImport, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackConfirmImport}, b.handleTrainingConfirmImport, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackImportExisting}, b.handleTrainingImportExisting, currentCard)
@@ -284,7 +294,7 @@ func (b *Bot) handleText(c tele.Context) error {
 	case training.InputRename:
 		raw := c.Text()
 		b.deleteIncoming(c)
-		preview, err := b.deps.Training.PrepareExerciseRename(ctx, ownerID, raw)
+		result, err := b.deps.Training.RenameExercise(ctx, ownerID, raw)
 		if err != nil {
 			if state.PendingExerciseID != nil {
 				if exercise, loadErr := b.deps.Training.Exercise(ctx, ownerID, *state.PendingExerciseID); loadErr == nil {
@@ -293,18 +303,42 @@ func (b *Bot) handleText(c tele.Context) error {
 			}
 			return b.showTrainingFailure(ctx, c, ownerID, err)
 		}
-		return b.showTrainingRenameScope(ctx, c, ownerID, preview)
-	case training.InputRenameOK:
-		b.deleteIncoming(c)
-		if state.PendingExerciseID != nil && state.PendingExerciseName != "" {
-			if exercise, loadErr := b.deps.Training.Exercise(ctx, ownerID, *state.PendingExerciseID); loadErr == nil {
-				return b.showTrainingRenameScope(ctx, c, ownerID, training.RenamePreview{
-					Exercise: exercise,
-					NewName:  state.PendingExerciseName,
-				})
-			}
+		updated, failed := b.updatePublishedTrainings(result.PublishedSessions)
+		notice := "Упражнение переименовано во всех программах и тренировках."
+		if result.Merged {
+			notice = "Упражнение заменено существующим во всех программах и тренировках."
 		}
-		return b.showTrainingFailure(ctx, c, ownerID, training.ErrNotEditable)
+		if failed > 0 {
+			notice += fmt.Sprintf(" Публикаций обновлено: %d; не удалось: %d.", updated, failed)
+		} else if updated > 0 {
+			notice += fmt.Sprintf(" Публикаций обновлено: %d.", updated)
+		}
+		return b.showTrainingExercises(ctx, c, ownerID, 1, notice)
+	case training.InputProgramExerciseChoice:
+		b.deleteIncoming(c)
+		replacement, err := b.deps.Training.PendingProgramExerciseReplacement(ctx, ownerID)
+		if err != nil {
+			return b.showTrainingFailure(ctx, c, ownerID, err)
+		}
+		return b.showTrainingProgramExerciseChoices(ctx, c, ownerID, replacement, 1, "Выбери упражнение кнопкой ниже.")
+	case training.InputProgramExerciseNew:
+		raw := c.Text()
+		b.deleteIncoming(c)
+		replacement, err := b.deps.Training.PrepareNewProgramExercise(ctx, ownerID, raw)
+		if err != nil {
+			if pending, loadErr := b.deps.Training.PendingProgramExerciseReplacement(ctx, ownerID); loadErr == nil {
+				return b.showTrainingProgramExerciseNew(ctx, c, ownerID, pending, "Не удалось сохранить название: "+err.Error())
+			}
+			return b.showTrainingFailure(ctx, c, ownerID, err)
+		}
+		return b.showTrainingProgramExerciseScope(ctx, c, ownerID, replacement)
+	case training.InputProgramExerciseConfirm:
+		b.deleteIncoming(c)
+		replacement, err := b.deps.Training.PendingProgramExerciseReplacement(ctx, ownerID)
+		if err != nil {
+			return b.showTrainingFailure(ctx, c, ownerID, err)
+		}
+		return b.showTrainingProgramExerciseScope(ctx, c, ownerID, replacement)
 	default:
 		return b.handleMenu(c)
 	}
@@ -435,6 +469,9 @@ func (b *Bot) handleTrainingPrograms(c tele.Context) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	ownerID := c.Sender().ID
+	if err := b.deps.Training.ClearInput(ctx, ownerID); err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
 	programs, err := b.deps.Training.Programs(ctx, ownerID)
 	if err != nil {
 		return b.showTrainingFailure(ctx, c, ownerID, err)
@@ -449,11 +486,131 @@ func (b *Bot) handleTrainingPrograms(c tele.Context) error {
 		}
 	}
 	markup := &tele.ReplyMarkup{}
-	markup.Inline(
+	rows := make([]tele.Row, 0, len(programs)+2)
+	for _, program := range programs {
+		rows = append(rows, markup.Row(markup.Data(
+			truncateTrainingButton("✏️ "+program.Name),
+			trainingCallbackProgramView,
+			strconv.FormatInt(program.ID, 10),
+		)))
+	}
+	rows = append(rows,
 		markup.Row(markup.Data("📎 Импорт", trainingCallbackImport)),
 		markup.Row(markup.Data("‹ Назад", trainingCallbackHome)),
 	)
+	markup.Inline(rows...)
 	return b.editTrainingCard(ctx, c, ownerID, text.String(), markup)
+}
+
+func (b *Bot) handleTrainingProgramView(c tele.Context) error {
+	b.respond(c)
+	programID, err := parseTrainingID(c.Data())
+	if err != nil {
+		return fmt.Errorf("invalid training program callback %q: %w", c.Data(), err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	if err := b.deps.Training.ClearInput(ctx, ownerID); err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	program, err := b.deps.Training.Program(ctx, ownerID, programID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showTrainingProgram(ctx, c, program, "")
+}
+
+func (b *Bot) handleTrainingProgramExercise(c tele.Context) error {
+	b.respond(c)
+	programExerciseID, err := parseTrainingID(c.Data())
+	if err != nil {
+		return fmt.Errorf("invalid program exercise callback %q: %w", c.Data(), err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	replacement, err := b.deps.Training.BeginProgramExerciseReplacement(ctx, ownerID, programExerciseID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showTrainingProgramExerciseChoices(ctx, c, ownerID, replacement, 1, "")
+}
+
+func (b *Bot) handleTrainingProgramExercisePage(c tele.Context) error {
+	b.respond(c)
+	page, err := parseTrainingPage(c.Data())
+	if err != nil {
+		return fmt.Errorf("invalid program exercise page %q: %w", c.Data(), err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	replacement, err := b.deps.Training.PendingProgramExerciseReplacement(ctx, ownerID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showTrainingProgramExerciseChoices(ctx, c, ownerID, replacement, page, "")
+}
+
+func (b *Bot) handleTrainingProgramExerciseExisting(c tele.Context) error {
+	b.respond(c)
+	targetExerciseID, err := parseTrainingID(c.Data())
+	if err != nil {
+		return fmt.Errorf("invalid replacement exercise callback %q: %w", c.Data(), err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	replacement, err := b.deps.Training.ChooseExistingProgramExercise(ctx, ownerID, targetExerciseID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showTrainingProgramExerciseScope(ctx, c, ownerID, replacement)
+}
+
+func (b *Bot) handleTrainingProgramExerciseNew(c tele.Context) error {
+	b.respond(c)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	replacement, err := b.deps.Training.ExpectNewProgramExercise(ctx, ownerID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showTrainingProgramExerciseNew(ctx, c, ownerID, replacement, "")
+}
+
+func (b *Bot) handleTrainingProgramExerciseOnly(c tele.Context) error {
+	return b.handleTrainingProgramExerciseConfirmation(c, false)
+}
+
+func (b *Bot) handleTrainingProgramExerciseHistory(c tele.Context) error {
+	return b.handleTrainingProgramExerciseConfirmation(c, true)
+}
+
+func (b *Bot) handleTrainingProgramExerciseConfirmation(c tele.Context, replaceHistory bool) error {
+	b.respond(c)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	result, err := b.deps.Training.ConfirmProgramExerciseReplacement(ctx, ownerID, replaceHistory)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+
+	if !replaceHistory {
+		return b.showTrainingProgram(ctx, c, result.Program,
+			"Упражнение заменено только в программе. Прошлые тренировки и публикации не изменены.")
+	}
+	updated, failed := b.updatePublishedTrainings(result.PublishedSessions)
+	notice := "Упражнение заменено в программе и прошлых тренировках."
+	if failed > 0 {
+		notice += fmt.Sprintf(" Публикаций обновлено: %d; не удалось: %d.", updated, failed)
+	} else if updated > 0 {
+		notice += fmt.Sprintf(" Публикаций обновлено: %d.", updated)
+	}
+	return b.showTrainingProgram(ctx, c, result.Program, notice)
 }
 
 func (b *Bot) handleTrainingExercises(c tele.Context) error {
@@ -501,45 +658,6 @@ func (b *Bot) handleTrainingRenameExercise(c tele.Context) error {
 		return b.showTrainingFailure(ctx, c, ownerID, err)
 	}
 	return b.showTrainingExercise(ctx, c, exercise, int(pageValue), "Отправь новое название одним сообщением.")
-}
-
-func (b *Bot) handleTrainingRenamePrograms(c tele.Context) error {
-	return b.handleTrainingRenameConfirmation(c, false)
-}
-
-func (b *Bot) handleTrainingRenameChannels(c tele.Context) error {
-	return b.handleTrainingRenameConfirmation(c, true)
-}
-
-func (b *Bot) handleTrainingRenameConfirmation(c tele.Context, replaceHistory bool) error {
-	b.respond(c)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	ownerID := c.Sender().ID
-	result, err := b.deps.Training.ConfirmExerciseRename(ctx, ownerID, replaceHistory)
-	if err != nil {
-		return b.showTrainingFailure(ctx, c, ownerID, err)
-	}
-
-	if !replaceHistory {
-		notice := "Упражнение переименовано только в программах. Прошлые тренировки и публикации не изменены."
-		if result.Merged {
-			notice = "Упражнение заменено существующим только в программах. Прошлые тренировки и публикации не изменены."
-		}
-		return b.showTrainingExercises(ctx, c, ownerID, 1, notice)
-	}
-
-	updated, failed := b.updatePublishedTrainings(result.PublishedSessions)
-	notice := "Упражнение переименовано во всех программах и тренировках."
-	if result.Merged {
-		notice = "Упражнение заменено существующим во всех программах и тренировках."
-	}
-	if failed > 0 {
-		notice += fmt.Sprintf(" Публикаций обновлено: %d; не удалось: %d.", updated, failed)
-	} else if updated > 0 {
-		notice += fmt.Sprintf(" Публикаций обновлено: %d.", updated)
-	}
-	return b.showTrainingExercises(ctx, c, ownerID, 1, notice)
 }
 
 func (b *Bot) handleTrainingHistory(c tele.Context) error {
@@ -1133,20 +1251,132 @@ func (b *Bot) showTrainingExercise(
 	return b.editTrainingCard(ctx, c, exercise.OwnerID, text.String(), markup)
 }
 
-func (b *Bot) showTrainingRenameScope(
+func (b *Bot) showTrainingProgram(
+	ctx context.Context,
+	c tele.Context,
+	program training.Program,
+	notice string,
+) error {
+	var text strings.Builder
+	text.WriteString("<b>📚 " + html.EscapeString(program.Name) + "</b>\n")
+	text.WriteString("\nНажми упражнение, которое хочешь заменить:")
+	for _, exercise := range program.ExerciseItems {
+		fmt.Fprintf(&text, "\n%d. %s", exercise.Position, html.EscapeString(exercise.Name))
+	}
+	if notice != "" {
+		text.WriteString("\n\n✅ " + html.EscapeString(notice))
+	}
+	markup := &tele.ReplyMarkup{}
+	rows := make([]tele.Row, 0, len(program.ExerciseItems)+1)
+	for _, exercise := range program.ExerciseItems {
+		rows = append(rows, markup.Row(markup.Data(
+			truncateTrainingButton(fmt.Sprintf("%d. %s", exercise.Position, exercise.Name)),
+			trainingCallbackProgramExercise,
+			strconv.FormatInt(exercise.ID, 10),
+		)))
+	}
+	rows = append(rows, markup.Row(markup.Data("‹ К программам", trainingCallbackPrograms)))
+	markup.Inline(rows...)
+	return b.editTrainingCard(ctx, c, program.OwnerID, text.String(), markup)
+}
+
+func (b *Bot) showTrainingProgramExerciseChoices(
 	ctx context.Context,
 	c tele.Context,
 	ownerID int64,
-	preview training.RenamePreview,
+	replacement training.ProgramExerciseReplacement,
+	pageNumber int,
+	notice string,
 ) error {
-	text := "<b>✏️ Замена упражнения</b>\n\n" +
-		html.EscapeString(preview.Exercise.Name) + " → <b>" + html.EscapeString(preview.NewName) + "</b>\n\n" +
-		"Заменить название в прошлых тренировках и публикациях в каналах?"
+	page, err := b.deps.Training.Exercises(ctx, ownerID, pageNumber, trainingPageSize)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	var text strings.Builder
+	text.WriteString("<b>🔁 Замена в программе</b>\n")
+	text.WriteString("\n" + html.EscapeString(replacement.Program.Name))
+	fmt.Fprintf(&text, "\n%d. <b>%s</b>", replacement.Current.Position, html.EscapeString(replacement.Current.Name))
+	text.WriteString("\n\nВыбери существующее упражнение или добавь новое.")
+	if notice != "" {
+		text.WriteString("\n\n<b>" + html.EscapeString(notice) + "</b>")
+	}
+
+	markup := &tele.ReplyMarkup{}
+	rows := make([]tele.Row, 0, len(page.Items)+3)
+	for _, exercise := range page.Items {
+		if replacement.Current.ExerciseID != nil && exercise.ID == *replacement.Current.ExerciseID {
+			continue
+		}
+		rows = append(rows, markup.Row(markup.Data(
+			truncateTrainingButton("♻️ "+exercise.Name),
+			trainingCallbackProgramExerciseExisting,
+			strconv.FormatInt(exercise.ID, 10),
+		)))
+	}
+	if page.TotalPages > 1 {
+		var navigation tele.Row
+		if page.Page > 1 {
+			navigation = append(navigation, markup.Data("‹", trainingCallbackProgramExercisePage, strconv.Itoa(page.Page-1)))
+		}
+		navigation = append(navigation, markup.Data(
+			fmt.Sprintf("%d/%d", page.Page, page.TotalPages),
+			trainingCallbackProgramExercisePage,
+			strconv.Itoa(page.Page),
+		))
+		if page.Page < page.TotalPages {
+			navigation = append(navigation, markup.Data("›", trainingCallbackProgramExercisePage, strconv.Itoa(page.Page+1)))
+		}
+		rows = append(rows, navigation)
+	}
+	rows = append(rows,
+		markup.Row(markup.Data("➕ Новое упражнение", trainingCallbackProgramExerciseNew)),
+		markup.Row(markup.Data(
+			"‹ Отмена", trainingCallbackProgramView, strconv.FormatInt(replacement.Program.ID, 10),
+		)),
+	)
+	markup.Inline(rows...)
+	return b.editTrainingCard(ctx, c, ownerID, text.String(), markup)
+}
+
+func (b *Bot) showTrainingProgramExerciseNew(
+	ctx context.Context,
+	c tele.Context,
+	ownerID int64,
+	replacement training.ProgramExerciseReplacement,
+	notice string,
+) error {
+	text := "<b>➕ Новое упражнение</b>\n\n" +
+		html.EscapeString(replacement.Program.Name) + "\n" +
+		fmt.Sprintf("%d. %s", replacement.Current.Position, html.EscapeString(replacement.Current.Name)) +
+		"\n\nОтправь название нового упражнения одним сообщением."
+	if notice != "" {
+		text += "\n\n<b>" + html.EscapeString(notice) + "</b>"
+	}
+	markup := &tele.ReplyMarkup{}
+	markup.Inline(markup.Row(markup.Data(
+		"‹ Отмена", trainingCallbackProgramView, strconv.FormatInt(replacement.Program.ID, 10),
+	)))
+	return b.editTrainingCard(ctx, c, ownerID, text, markup)
+}
+
+func (b *Bot) showTrainingProgramExerciseScope(
+	ctx context.Context,
+	c tele.Context,
+	ownerID int64,
+	replacement training.ProgramExerciseReplacement,
+) error {
+	text := "<b>🔁 Замена в программе</b>\n\n" +
+		html.EscapeString(replacement.Program.Name) + "\n" +
+		fmt.Sprintf("%d. ", replacement.Current.Position) + html.EscapeString(replacement.Current.Name) +
+		" → <b>" + html.EscapeString(replacement.Target.Name) + "</b>\n\n" +
+		"Заменить упражнение в прошлых завершённых тренировках этой программы и их публикациях в каналах?"
 	markup := &tele.ReplyMarkup{}
 	markup.Inline(
-		markup.Row(markup.Data("Нет, только в программах", trainingCallbackRenamePrograms)),
-		markup.Row(markup.Data("Да, заменить и в каналах", trainingCallbackRenameChannels)),
-		markup.Row(markup.Data("‹ Отмена", trainingCallbackExercises, "1")),
+		markup.Row(markup.Data("Нет, только программу", trainingCallbackProgramExerciseOnly)),
+		markup.Row(markup.Data("Да, заменить и в каналах", trainingCallbackProgramExerciseHistory)),
+		markup.Row(markup.Data(
+			"‹ Отмена", trainingCallbackProgramView, strconv.FormatInt(replacement.Program.ID, 10),
+		)),
 	)
 	return b.editTrainingCard(ctx, c, ownerID, text, markup)
 }

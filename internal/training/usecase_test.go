@@ -9,16 +9,22 @@ import (
 
 type stateRepository struct {
 	Repository
-	state            UIState
-	deletedSessionID int64
-	exercises        []Exercise
-	totalExercises   int
-	listLimit        int
-	listOffset       int
-	renameResult     RenameResult
-	renamedID        int64
-	renamedName      string
-	replacedHistory  bool
+	state                     UIState
+	deletedSessionID          int64
+	exercises                 []Exercise
+	totalExercises            int
+	listLimit                 int
+	listOffset                int
+	renameResult              RenameResult
+	renamedID                 int64
+	renamedName               string
+	program                   Program
+	programReplacement        ProgramExerciseReplacement
+	programReplaceResult      ProgramExerciseReplaceResult
+	replacedProgramExerciseID int64
+	replacementTargetID       *int64
+	replacementTargetName     string
+	replacedHistory           bool
 }
 
 func (r *stateRepository) GetUIState(context.Context, int64) (UIState, error) {
@@ -54,16 +60,32 @@ func (r *stateRepository) Exercise(_ context.Context, _ int64, exerciseID int64)
 	return Exercise{}, ErrNotFound
 }
 
-func (r *stateRepository) RenameExercise(
+func (r *stateRepository) Program(context.Context, int64, int64) (Program, error) {
+	return r.program, nil
+}
+
+func (r *stateRepository) ProgramExercise(context.Context, int64, int64) (ProgramExerciseReplacement, error) {
+	return r.programReplacement, nil
+}
+
+func (r *stateRepository) ReplaceProgramExercise(
 	_ context.Context,
 	_ int64,
-	exerciseID int64,
-	name string,
+	programExerciseID int64,
+	targetExerciseID *int64,
+	targetName string,
 	replaceHistory bool,
-) (RenameResult, error) {
+) (ProgramExerciseReplaceResult, error) {
+	r.replacedProgramExerciseID = programExerciseID
+	r.replacementTargetID = targetExerciseID
+	r.replacementTargetName = targetName
+	r.replacedHistory = replaceHistory
+	return r.programReplaceResult, nil
+}
+
+func (r *stateRepository) RenameExercise(_ context.Context, _ int64, exerciseID int64, name string) (RenameResult, error) {
 	r.renamedID = exerciseID
 	r.renamedName = name
-	r.replacedHistory = replaceHistory
 	return r.renameResult, nil
 }
 
@@ -152,48 +174,81 @@ func TestImportReviewReplacesOnlySelectedExercise(t *testing.T) {
 	require.True(t, done)
 }
 
-func TestExerciseRenameRequiresScopeConfirmation(t *testing.T) {
+func TestRenameExerciseKeepsGlobalCatalogBehavior(t *testing.T) {
 	exerciseID := int64(7)
 	repo := &stateRepository{
 		state:        UIState{OwnerID: 42, Mode: InputRename, PendingExerciseID: &exerciseID},
-		exercises:    []Exercise{{ID: exerciseID, OwnerID: 42, Name: "Старая тяга"}},
 		renameResult: RenameResult{Exercise: Exercise{ID: exerciseID, Name: "Новая тяга"}},
 	}
-	usecase := NewUseCase(repo)
 
-	preview, err := usecase.PrepareExerciseRename(context.Background(), 42, "  Новая тяга  ")
-
-	require.NoError(t, err)
-	require.Equal(t, "Старая тяга", preview.Exercise.Name)
-	require.Equal(t, "Новая тяга", preview.NewName)
-	require.Equal(t, InputRenameOK, repo.state.Mode)
-	require.Equal(t, "Новая тяга", repo.state.PendingExerciseName)
-	require.Zero(t, repo.renamedID, "rename must wait for the scope button")
-
-	result, err := usecase.ConfirmExerciseRename(context.Background(), 42, false)
+	result, err := NewUseCase(repo).RenameExercise(context.Background(), 42, "  Новая тяга  ")
 
 	require.NoError(t, err)
 	require.Equal(t, exerciseID, repo.renamedID)
 	require.Equal(t, "Новая тяга", repo.renamedName)
-	require.False(t, repo.replacedHistory)
 	require.Equal(t, "Новая тяга", result.Exercise.Name)
 	require.Equal(t, InputNone, repo.state.Mode)
 	require.Nil(t, repo.state.PendingExerciseID)
-	require.Empty(t, repo.state.PendingExerciseName)
 }
 
-func TestExerciseRenameCanReplaceHistory(t *testing.T) {
-	exerciseID := int64(7)
+func TestProgramExerciseCanBeReplacedWithExistingOnlyInProgram(t *testing.T) {
+	programExerciseID := int64(17)
+	targetExerciseID := int64(9)
+	program := Program{ID: 3, OwnerID: 42, Name: "Fullbody A"}
 	repo := &stateRepository{
-		state: UIState{
-			OwnerID: 42, Mode: InputRenameOK, PendingExerciseID: &exerciseID,
-			PendingExerciseName: "Новая тяга",
+		state:     UIState{OwnerID: 42},
+		exercises: []Exercise{{ID: targetExerciseID, OwnerID: 42, Name: "Тяга верхнего блока"}},
+		programReplacement: ProgramExerciseReplacement{
+			Program: program,
+			Current: ProgramExercise{ID: programExerciseID, Position: 2, Name: "Тяга гантели"},
 		},
-		renameResult: RenameResult{Exercise: Exercise{ID: exerciseID, Name: "Новая тяга"}},
+		programReplaceResult: ProgramExerciseReplaceResult{Program: program},
 	}
+	usecase := NewUseCase(repo)
 
-	_, err := NewUseCase(repo).ConfirmExerciseRename(context.Background(), 42, true)
+	_, err := usecase.BeginProgramExerciseReplacement(context.Background(), 42, programExerciseID)
+	require.NoError(t, err)
+	require.Equal(t, InputProgramExerciseChoice, repo.state.Mode)
+
+	preview, err := usecase.ChooseExistingProgramExercise(context.Background(), 42, targetExerciseID)
+	require.NoError(t, err)
+	require.Equal(t, "Тяга верхнего блока", preview.Target.Name)
+	require.Equal(t, InputProgramExerciseConfirm, repo.state.Mode)
+
+	_, err = usecase.ConfirmProgramExerciseReplacement(context.Background(), 42, false)
+	require.NoError(t, err)
+	require.Equal(t, programExerciseID, repo.replacedProgramExerciseID)
+	require.Equal(t, targetExerciseID, *repo.replacementTargetID)
+	require.Empty(t, repo.replacementTargetName)
+	require.False(t, repo.replacedHistory)
+	require.Equal(t, InputNone, repo.state.Mode)
+}
+
+func TestProgramExerciseCanBeReplacedWithNewAndHistory(t *testing.T) {
+	programExerciseID := int64(17)
+	program := Program{ID: 3, OwnerID: 42, Name: "Fullbody A"}
+	repo := &stateRepository{
+		state: UIState{OwnerID: 42},
+		programReplacement: ProgramExerciseReplacement{
+			Program: program,
+			Current: ProgramExercise{ID: programExerciseID, Position: 2, Name: "Тяга гантели"},
+		},
+		programReplaceResult: ProgramExerciseReplaceResult{Program: program},
+	}
+	usecase := NewUseCase(repo)
+
+	_, err := usecase.BeginProgramExerciseReplacement(context.Background(), 42, programExerciseID)
+	require.NoError(t, err)
+	_, err = usecase.ExpectNewProgramExercise(context.Background(), 42)
+	require.NoError(t, err)
+	preview, err := usecase.PrepareNewProgramExercise(context.Background(), 42, "  Тяга Т-грифа  ")
+	require.NoError(t, err)
+	require.Equal(t, "Тяга Т-грифа", preview.Target.Name)
+
+	_, err = usecase.ConfirmProgramExerciseReplacement(context.Background(), 42, true)
 
 	require.NoError(t, err)
+	require.Nil(t, repo.replacementTargetID)
+	require.Equal(t, "Тяга Т-грифа", repo.replacementTargetName)
 	require.True(t, repo.replacedHistory)
 }

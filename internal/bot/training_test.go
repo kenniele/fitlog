@@ -26,8 +26,10 @@ func TestTrainingPairRoundTrip(t *testing.T) {
 	require.LessOrEqual(t, len("\f"+trainingCallbackConfirmDelete+"|"+maxID), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackDeleteLocal+"|"+maxID), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackRenameExercise+"|"+payload), 64)
-	require.LessOrEqual(t, len("\f"+trainingCallbackRenamePrograms), 64)
-	require.LessOrEqual(t, len("\f"+trainingCallbackRenameChannels), 64)
+	require.LessOrEqual(t, len("\f"+trainingCallbackProgramView+"|"+maxID), 64)
+	require.LessOrEqual(t, len("\f"+trainingCallbackProgramExercise+"|"+maxID), 64)
+	require.LessOrEqual(t, len("\f"+trainingCallbackProgramExerciseExisting+"|"+maxID), 64)
+	require.LessOrEqual(t, len("\f"+trainingCallbackProgramExerciseHistory), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackImportExisting+"|"+maxID), 64)
 }
 

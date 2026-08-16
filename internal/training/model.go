@@ -24,13 +24,15 @@ var (
 type InputMode string
 
 const (
-	InputNone       InputMode = ""
-	InputSet        InputMode = "set"
-	InputNote       InputMode = "note"
-	InputImportFile InputMode = "import_file"
-	InputImportOK   InputMode = "import_preview"
-	InputRename     InputMode = "exercise_rename"
-	InputRenameOK   InputMode = "exercise_rename_confirm"
+	InputNone                   InputMode = ""
+	InputSet                    InputMode = "set"
+	InputNote                   InputMode = "note"
+	InputImportFile             InputMode = "import_file"
+	InputImportOK               InputMode = "import_preview"
+	InputRename                 InputMode = "exercise_rename"
+	InputProgramExerciseChoice  InputMode = "program_exercise_choice"
+	InputProgramExerciseNew     InputMode = "program_exercise_new"
+	InputProgramExerciseConfirm InputMode = "program_exercise_confirm"
 )
 
 // ProgramInput is the normalized representation produced by a TXT or CSV
@@ -59,10 +61,18 @@ type ImportExerciseReview struct {
 }
 
 type Program struct {
-	ID        int64
-	OwnerID   int64
-	Name      string
-	Exercises []string
+	ID            int64
+	OwnerID       int64
+	Name          string
+	Exercises     []string
+	ExerciseItems []ProgramExercise
+}
+
+type ProgramExercise struct {
+	ID         int64
+	ExerciseID *int64
+	Position   int
+	Name       string
 }
 
 type Exercise struct {
@@ -94,9 +104,15 @@ type RenameResult struct {
 	PublishedSessions []Session
 }
 
-type RenamePreview struct {
-	Exercise Exercise
-	NewName  string
+type ProgramExerciseReplacement struct {
+	Program Program
+	Current ProgramExercise
+	Target  Exercise
+}
+
+type ProgramExerciseReplaceResult struct {
+	Program           Program
+	PublishedSessions []Session
 }
 
 // SetInput is the structured meaning of either "12Р 40КГ" or "12Р -".
@@ -155,13 +171,15 @@ func (s Session) CurrentExercise() *SessionExercise {
 }
 
 type UIState struct {
-	OwnerID             int64
-	ChatID              int64
-	MessageID           int
-	Mode                InputMode
-	PendingImport       *ImportPreview
-	PendingExerciseID   *int64
-	PendingExerciseName string
+	OwnerID                  int64
+	ChatID                   int64
+	MessageID                int
+	Mode                     InputMode
+	PendingImport            *ImportPreview
+	PendingExerciseID        *int64
+	PendingExerciseName      string
+	PendingProgramExerciseID *int64
+	PendingTargetExerciseID  *int64
 }
 
 // Repository persists all durable workout and card state. The PostgreSQL
@@ -170,11 +188,14 @@ type Repository interface {
 	GetUIState(ctx context.Context, ownerID int64) (UIState, error)
 	SaveUIState(ctx context.Context, state UIState) error
 	ListPrograms(ctx context.Context, ownerID int64) ([]Program, error)
+	Program(ctx context.Context, ownerID, programID int64) (Program, error)
 	ReplacePrograms(ctx context.Context, ownerID int64, programs []ProgramInput) error
 	ListExercises(ctx context.Context, ownerID int64, limit, offset int) ([]Exercise, int, error)
 	SimilarExercises(ctx context.Context, ownerID int64, name string, limit int) ([]Exercise, error)
 	Exercise(ctx context.Context, ownerID, exerciseID int64) (Exercise, error)
-	RenameExercise(ctx context.Context, ownerID, exerciseID int64, name string, replaceHistory bool) (RenameResult, error)
+	RenameExercise(ctx context.Context, ownerID, exerciseID int64, name string) (RenameResult, error)
+	ProgramExercise(ctx context.Context, ownerID, programExerciseID int64) (ProgramExerciseReplacement, error)
+	ReplaceProgramExercise(ctx context.Context, ownerID, programExerciseID int64, targetExerciseID *int64, targetName string, replaceHistory bool) (ProgramExerciseReplaceResult, error)
 	StartSession(ctx context.Context, ownerID, programID int64, now time.Time) (Session, error)
 	ActiveSession(ctx context.Context, ownerID int64) (Session, error)
 	Session(ctx context.Context, ownerID, sessionID int64) (Session, error)

@@ -52,6 +52,8 @@ func (u *UseCase) OpenControlMessage(ctx context.Context, ownerID, chatID int64)
 	state.PendingImport = nil
 	state.PendingExerciseID = nil
 	state.PendingExerciseName = ""
+	state.PendingProgramExerciseID = nil
+	state.PendingTargetExerciseID = nil
 	return u.repo.SaveUIState(ctx, state)
 }
 
@@ -66,8 +68,10 @@ func (u *UseCase) Expect(ctx context.Context, ownerID int64, mode InputMode) err
 	}
 	if mode != InputRename {
 		state.PendingExerciseID = nil
-		state.PendingExerciseName = ""
 	}
+	state.PendingExerciseName = ""
+	state.PendingProgramExerciseID = nil
+	state.PendingTargetExerciseID = nil
 	return u.repo.SaveUIState(ctx, state)
 }
 
@@ -80,6 +84,8 @@ func (u *UseCase) ClearInput(ctx context.Context, ownerID int64) error {
 	state.PendingImport = nil
 	state.PendingExerciseID = nil
 	state.PendingExerciseName = ""
+	state.PendingProgramExerciseID = nil
+	state.PendingTargetExerciseID = nil
 	return u.repo.SaveUIState(ctx, state)
 }
 
@@ -233,6 +239,10 @@ func (u *UseCase) Programs(ctx context.Context, ownerID int64) ([]Program, error
 	return u.repo.ListPrograms(ctx, ownerID)
 }
 
+func (u *UseCase) Program(ctx context.Context, ownerID, programID int64) (Program, error) {
+	return u.repo.Program(ctx, ownerID, programID)
+}
+
 func (u *UseCase) Exercises(ctx context.Context, ownerID int64, page, pageSize int) (ExercisePage, error) {
 	if page < 1 || pageSize < 1 || pageSize > 20 {
 		return ExercisePage{}, ErrInvalidPage
@@ -268,55 +278,193 @@ func (u *UseCase) ExpectExerciseRename(ctx context.Context, ownerID, exerciseID 
 	state.PendingImport = nil
 	state.PendingExerciseID = &exerciseID
 	state.PendingExerciseName = ""
+	state.PendingProgramExerciseID = nil
+	state.PendingTargetExerciseID = nil
 	if err := u.repo.SaveUIState(ctx, state); err != nil {
 		return Exercise{}, err
 	}
 	return exercise, nil
 }
 
-func (u *UseCase) PrepareExerciseRename(ctx context.Context, ownerID int64, raw string) (RenamePreview, error) {
+func (u *UseCase) RenameExercise(ctx context.Context, ownerID int64, raw string) (RenameResult, error) {
 	name := strings.TrimSpace(raw)
 	if name == "" {
-		return RenamePreview{}, fmt.Errorf("название пустое")
+		return RenameResult{}, fmt.Errorf("название пустое")
 	}
 	if len([]rune(name)) > 200 {
-		return RenamePreview{}, fmt.Errorf("название длиннее 200 символов")
+		return RenameResult{}, fmt.Errorf("название длиннее 200 символов")
 	}
-	state, err := u.State(ctx, ownerID)
-	if err != nil {
-		return RenamePreview{}, err
-	}
-	if state.Mode != InputRename || state.PendingExerciseID == nil {
-		return RenamePreview{}, ErrNotEditable
-	}
-	exercise, err := u.repo.Exercise(ctx, ownerID, *state.PendingExerciseID)
-	if err != nil {
-		return RenamePreview{}, err
-	}
-	state.Mode = InputRenameOK
-	state.PendingExerciseName = name
-	if err := u.repo.SaveUIState(ctx, state); err != nil {
-		return RenamePreview{}, err
-	}
-	return RenamePreview{Exercise: exercise, NewName: name}, nil
-}
-
-func (u *UseCase) ConfirmExerciseRename(ctx context.Context, ownerID int64, replaceHistory bool) (RenameResult, error) {
 	state, err := u.State(ctx, ownerID)
 	if err != nil {
 		return RenameResult{}, err
 	}
-	if state.Mode != InputRenameOK || state.PendingExerciseID == nil || state.PendingExerciseName == "" {
+	if state.Mode != InputRename || state.PendingExerciseID == nil {
 		return RenameResult{}, ErrNotEditable
 	}
-	result, err := u.repo.RenameExercise(
-		ctx, ownerID, *state.PendingExerciseID, state.PendingExerciseName, replaceHistory,
-	)
+	result, err := u.repo.RenameExercise(ctx, ownerID, *state.PendingExerciseID, name)
 	if err != nil {
 		return RenameResult{}, err
 	}
 	if err := u.ClearInput(ctx, ownerID); err != nil {
 		return RenameResult{}, err
+	}
+	return result, nil
+}
+
+func (u *UseCase) BeginProgramExerciseReplacement(
+	ctx context.Context,
+	ownerID, programExerciseID int64,
+) (ProgramExerciseReplacement, error) {
+	replacement, err := u.repo.ProgramExercise(ctx, ownerID, programExerciseID)
+	if err != nil {
+		return ProgramExerciseReplacement{}, err
+	}
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return ProgramExerciseReplacement{}, err
+	}
+	state.Mode = InputProgramExerciseChoice
+	state.PendingImport = nil
+	state.PendingExerciseID = nil
+	state.PendingExerciseName = ""
+	state.PendingProgramExerciseID = &programExerciseID
+	state.PendingTargetExerciseID = nil
+	if err := u.repo.SaveUIState(ctx, state); err != nil {
+		return ProgramExerciseReplacement{}, err
+	}
+	return replacement, nil
+}
+
+func (u *UseCase) PendingProgramExerciseReplacement(
+	ctx context.Context,
+	ownerID int64,
+) (ProgramExerciseReplacement, error) {
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return ProgramExerciseReplacement{}, err
+	}
+	if state.PendingProgramExerciseID == nil {
+		return ProgramExerciseReplacement{}, ErrNotEditable
+	}
+	replacement, err := u.repo.ProgramExercise(ctx, ownerID, *state.PendingProgramExerciseID)
+	if err != nil {
+		return ProgramExerciseReplacement{}, err
+	}
+	if state.PendingTargetExerciseID != nil {
+		replacement.Target, err = u.repo.Exercise(ctx, ownerID, *state.PendingTargetExerciseID)
+		if err != nil {
+			return ProgramExerciseReplacement{}, err
+		}
+	} else if state.PendingExerciseName != "" {
+		replacement.Target = Exercise{OwnerID: ownerID, Name: state.PendingExerciseName}
+	}
+	return replacement, nil
+}
+
+func (u *UseCase) ChooseExistingProgramExercise(
+	ctx context.Context,
+	ownerID, targetExerciseID int64,
+) (ProgramExerciseReplacement, error) {
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return ProgramExerciseReplacement{}, err
+	}
+	if state.Mode != InputProgramExerciseChoice || state.PendingProgramExerciseID == nil {
+		return ProgramExerciseReplacement{}, ErrNotEditable
+	}
+	target, err := u.repo.Exercise(ctx, ownerID, targetExerciseID)
+	if err != nil {
+		return ProgramExerciseReplacement{}, err
+	}
+	state.Mode = InputProgramExerciseConfirm
+	state.PendingTargetExerciseID = &targetExerciseID
+	state.PendingExerciseName = ""
+	if err := u.repo.SaveUIState(ctx, state); err != nil {
+		return ProgramExerciseReplacement{}, err
+	}
+	replacement, err := u.repo.ProgramExercise(ctx, ownerID, *state.PendingProgramExerciseID)
+	if err != nil {
+		return ProgramExerciseReplacement{}, err
+	}
+	replacement.Target = target
+	return replacement, nil
+}
+
+func (u *UseCase) ExpectNewProgramExercise(
+	ctx context.Context,
+	ownerID int64,
+) (ProgramExerciseReplacement, error) {
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return ProgramExerciseReplacement{}, err
+	}
+	if state.Mode != InputProgramExerciseChoice || state.PendingProgramExerciseID == nil {
+		return ProgramExerciseReplacement{}, ErrNotEditable
+	}
+	state.Mode = InputProgramExerciseNew
+	state.PendingTargetExerciseID = nil
+	state.PendingExerciseName = ""
+	if err := u.repo.SaveUIState(ctx, state); err != nil {
+		return ProgramExerciseReplacement{}, err
+	}
+	return u.repo.ProgramExercise(ctx, ownerID, *state.PendingProgramExerciseID)
+}
+
+func (u *UseCase) PrepareNewProgramExercise(
+	ctx context.Context,
+	ownerID int64,
+	raw string,
+) (ProgramExerciseReplacement, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return ProgramExerciseReplacement{}, fmt.Errorf("название пустое")
+	}
+	if len([]rune(name)) > 200 {
+		return ProgramExerciseReplacement{}, fmt.Errorf("название длиннее 200 символов")
+	}
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return ProgramExerciseReplacement{}, err
+	}
+	if state.Mode != InputProgramExerciseNew || state.PendingProgramExerciseID == nil {
+		return ProgramExerciseReplacement{}, ErrNotEditable
+	}
+	state.Mode = InputProgramExerciseConfirm
+	state.PendingTargetExerciseID = nil
+	state.PendingExerciseName = name
+	if err := u.repo.SaveUIState(ctx, state); err != nil {
+		return ProgramExerciseReplacement{}, err
+	}
+	replacement, err := u.repo.ProgramExercise(ctx, ownerID, *state.PendingProgramExerciseID)
+	if err != nil {
+		return ProgramExerciseReplacement{}, err
+	}
+	replacement.Target = Exercise{OwnerID: ownerID, Name: name}
+	return replacement, nil
+}
+
+func (u *UseCase) ConfirmProgramExerciseReplacement(
+	ctx context.Context,
+	ownerID int64,
+	replaceHistory bool,
+) (ProgramExerciseReplaceResult, error) {
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return ProgramExerciseReplaceResult{}, err
+	}
+	if state.Mode != InputProgramExerciseConfirm || state.PendingProgramExerciseID == nil ||
+		(state.PendingTargetExerciseID == nil && state.PendingExerciseName == "") {
+		return ProgramExerciseReplaceResult{}, ErrNotEditable
+	}
+	result, err := u.repo.ReplaceProgramExercise(
+		ctx, ownerID, *state.PendingProgramExerciseID,
+		state.PendingTargetExerciseID, state.PendingExerciseName, replaceHistory,
+	)
+	if err != nil {
+		return ProgramExerciseReplaceResult{}, err
+	}
+	if err := u.ClearInput(ctx, ownerID); err != nil {
+		return ProgramExerciseReplaceResult{}, err
 	}
 	return result, nil
 }
