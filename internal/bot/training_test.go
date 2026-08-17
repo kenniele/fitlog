@@ -41,6 +41,18 @@ func TestStripYAMLCodeBlock(t *testing.T) {
 	require.Equal(t, "version: 1", stripYAMLCodeBlock(" version: 1 "))
 }
 
+func TestTrainingProgramsTitleUsesSharedPlanName(t *testing.T) {
+	programs := []training.Program{
+		{PlanID: 10, PlanName: "V-фигура · фуллбади 3 дня", Name: "Фуллбади A"},
+		{PlanID: 10, PlanName: "V-фигура · фуллбади 3 дня", Name: "Фуллбади B"},
+	}
+	require.Equal(t, "V-фигура · фуллбади 3 дня", trainingProgramsTitle(programs))
+
+	programs[1].PlanID = 11
+	require.Equal(t, "Программы", trainingProgramsTitle(programs))
+	require.Equal(t, "Программы", trainingProgramsTitle(nil))
+}
+
 func TestParseTrainingPage(t *testing.T) {
 	page, err := parseTrainingPage("")
 	require.NoError(t, err)

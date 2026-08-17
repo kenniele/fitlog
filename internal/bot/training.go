@@ -647,13 +647,11 @@ func (b *Bot) handleTrainingPrograms(c tele.Context) error {
 		return b.showTrainingFailure(ctx, c, ownerID, err)
 	}
 	var text strings.Builder
-	text.WriteString("<b>📚 Программы</b>\n")
+	fmt.Fprintf(&text, "<b>📚 %s</b>\n", html.EscapeString(trainingProgramsTitle(programs)))
 	if len(programs) == 0 {
 		text.WriteString("\nПока ничего не сохранено.")
 	} else {
-		for _, program := range programs {
-			fmt.Fprintf(&text, "\n• %s — %d упр.", html.EscapeString(program.Name), len(program.Exercises))
-		}
+		text.WriteString("\nВыбери тренировку для редактирования.")
 	}
 	markup := &tele.ReplyMarkup{}
 	rows := make([]tele.Row, 0, len(programs)+2)
@@ -670,6 +668,20 @@ func (b *Bot) handleTrainingPrograms(c tele.Context) error {
 	)
 	markup.Inline(rows...)
 	return b.editTrainingCard(ctx, c, ownerID, text.String(), markup)
+}
+
+func trainingProgramsTitle(programs []training.Program) string {
+	if len(programs) == 0 || strings.TrimSpace(programs[0].PlanName) == "" {
+		return "Программы"
+	}
+	planID := programs[0].PlanID
+	planName := programs[0].PlanName
+	for _, program := range programs[1:] {
+		if program.PlanID != planID {
+			return "Программы"
+		}
+	}
+	return planName
 }
 
 func (b *Bot) handleTrainingProgramView(c tele.Context) error {
