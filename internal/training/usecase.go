@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -54,6 +55,7 @@ func (u *UseCase) OpenControlMessage(ctx context.Context, ownerID, chatID int64)
 	state.PendingExerciseName = ""
 	state.PendingProgramExerciseID = nil
 	state.PendingTargetExerciseID = nil
+	state.PendingSet = nil
 	return u.repo.SaveUIState(ctx, state)
 }
 
@@ -72,6 +74,9 @@ func (u *UseCase) Expect(ctx context.Context, ownerID int64, mode InputMode) err
 	state.PendingExerciseName = ""
 	state.PendingProgramExerciseID = nil
 	state.PendingTargetExerciseID = nil
+	if mode != InputRIR {
+		state.PendingSet = nil
+	}
 	return u.repo.SaveUIState(ctx, state)
 }
 
@@ -86,6 +91,7 @@ func (u *UseCase) ClearInput(ctx context.Context, ownerID int64) error {
 	state.PendingExerciseName = ""
 	state.PendingProgramExerciseID = nil
 	state.PendingTargetExerciseID = nil
+	state.PendingSet = nil
 	return u.repo.SaveUIState(ctx, state)
 }
 
@@ -280,6 +286,7 @@ func (u *UseCase) ExpectExerciseRename(ctx context.Context, ownerID, exerciseID 
 	state.PendingExerciseName = ""
 	state.PendingProgramExerciseID = nil
 	state.PendingTargetExerciseID = nil
+	state.PendingSet = nil
 	if err := u.repo.SaveUIState(ctx, state); err != nil {
 		return Exercise{}, err
 	}
@@ -329,6 +336,7 @@ func (u *UseCase) BeginProgramExerciseReplacement(
 	state.PendingExerciseName = ""
 	state.PendingProgramExerciseID = &programExerciseID
 	state.PendingTargetExerciseID = nil
+	state.PendingSet = nil
 	if err := u.repo.SaveUIState(ctx, state); err != nil {
 		return ProgramExerciseReplacement{}, err
 	}
@@ -490,6 +498,8 @@ func (u *UseCase) AddSet(ctx context.Context, ownerID int64, raw string) (Sessio
 	if err != nil {
 		return Session{}, err
 	}
+	input.Type = SetTypeWorking
+	input.CompletedAt = time.Now()
 	session, err := u.repo.AddSet(ctx, ownerID, input)
 	if err != nil {
 		return Session{}, err
@@ -497,7 +507,230 @@ func (u *UseCase) AddSet(ctx context.Context, ownerID int64, raw string) (Sessio
 	if err := u.ClearInput(ctx, ownerID); err != nil {
 		return Session{}, err
 	}
+	return u.finishWhenPlanComplete(ctx, ownerID, session, input.CompletedAt)
+}
+
+func (u *UseCase) CompleteWarmup(ctx context.Context, ownerID int64, now time.Time) (Session, error) {
+	session, err := u.repo.ActiveSession(ctx, ownerID)
+	if err != nil {
+		return Session{}, err
+	}
+	exercise := session.CurrentExercise()
+	if exercise == nil || !exercise.Structured() {
+		return Session{}, ErrNotEditable
+	}
+	completed := len(exercise.WarmupSets())
+	if completed >= len(exercise.Warmup) {
+		return Session{}, ErrNotEditable
+	}
+	warmup := exercise.Warmup[completed]
+	updated, err := u.repo.AddSet(ctx, ownerID, SetInput{
+		Type: SetTypeWarmup, WeightKG: cloneFloat(warmup.WeightKG), Reps: warmup.Reps, CompletedAt: now,
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	if err := u.ClearInput(ctx, ownerID); err != nil {
+		return Session{}, err
+	}
+	return updated, nil
+}
+
+func (u *UseCase) PrepareWorkingSet(ctx context.Context, ownerID int64, reps int) (Session, error) {
+	return u.prepareWorkingSet(ctx, ownerID, reps, nil, false)
+}
+
+func (u *UseCase) PrepareWorkingSetWithWeight(
+	ctx context.Context,
+	ownerID int64,
+	reps int,
+	weightKG *float64,
+) (Session, error) {
+	return u.prepareWorkingSet(ctx, ownerID, reps, weightKG, true)
+}
+
+func (u *UseCase) prepareWorkingSet(
+	ctx context.Context,
+	ownerID int64,
+	reps int,
+	actualWeightKG *float64,
+	weightProvided bool,
+) (Session, error) {
+	if reps <= 0 || reps > 1000 {
+		return Session{}, fmt.Errorf("повторения должны быть от 1 до 1000")
+	}
+	session, err := u.repo.ActiveSession(ctx, ownerID)
+	if err != nil {
+		return Session{}, err
+	}
+	exercise := session.CurrentExercise()
+	if exercise == nil || !exercise.Structured() || len(exercise.WarmupSets()) < len(exercise.Warmup) {
+		return Session{}, ErrNotEditable
+	}
+	if len(exercise.WorkingSets()) >= exercise.Plan.WorkingSets {
+		return Session{}, ErrNotEditable
+	}
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return Session{}, err
+	}
+	state.Mode = InputRIR
+	weight := exercise.Plan.WeightKG
+	if weightProvided {
+		weight = actualWeightKG
+	}
+	state.PendingSet = &PendingSet{Type: SetTypeWorking, WeightKG: cloneFloat(weight), Reps: reps}
+	if err := u.repo.SaveUIState(ctx, state); err != nil {
+		return Session{}, err
+	}
 	return session, nil
+}
+
+func (u *UseCase) CompletePendingSet(
+	ctx context.Context,
+	ownerID int64,
+	rir *float64,
+	now time.Time,
+) (Session, error) {
+	if rir != nil && (*rir < 0 || *rir > 10) {
+		return Session{}, fmt.Errorf("RIR должен быть от 0 до 10")
+	}
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return Session{}, err
+	}
+	if state.Mode != InputRIR || state.PendingSet == nil {
+		return Session{}, ErrNoPendingSet
+	}
+	pending := *state.PendingSet
+	session, err := u.repo.AddSet(ctx, ownerID, SetInput{
+		Type: pending.Type, WeightKG: cloneFloat(pending.WeightKG),
+		Reps: pending.Reps, RIR: cloneFloat(rir), CompletedAt: now,
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	if err := u.ClearInput(ctx, ownerID); err != nil {
+		return Session{}, err
+	}
+	return u.finishWhenPlanComplete(ctx, ownerID, session, now)
+}
+
+func (u *UseCase) BeginOverride(ctx context.Context, ownerID int64) (Session, error) {
+	session, err := u.repo.ActiveSession(ctx, ownerID)
+	if err != nil {
+		return Session{}, err
+	}
+	exercise := session.CurrentExercise()
+	if exercise == nil || !exercise.Structured() {
+		return Session{}, ErrNotEditable
+	}
+	if err := u.Expect(ctx, ownerID, InputOverride); err != nil {
+		return Session{}, err
+	}
+	return session, nil
+}
+
+func (u *UseCase) OverrideCurrentExercise(ctx context.Context, ownerID int64, raw string) (Session, error) {
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return Session{}, err
+	}
+	if state.Mode != InputOverride {
+		return Session{}, ErrNotEditable
+	}
+	override, err := ParseExerciseOverride(raw)
+	if err != nil {
+		return Session{}, err
+	}
+	session, err := u.repo.OverrideCurrentExercise(ctx, ownerID, override)
+	if err != nil {
+		return Session{}, err
+	}
+	if err := u.ClearInput(ctx, ownerID); err != nil {
+		return Session{}, err
+	}
+	return session, nil
+}
+
+func ParseExerciseOverride(raw string) (ExerciseOverride, error) {
+	parts := strings.Split(raw, ";")
+	if len(parts) != 5 {
+		return ExerciseOverride{}, fmt.Errorf("нужен формат: 60;3;8-12;2;180s")
+	}
+	var weight *float64
+	weightRaw := strings.TrimSpace(strings.TrimSuffix(strings.ToLower(parts[0]), "kg"))
+	if weightRaw != "-" {
+		value, err := strconv.ParseFloat(strings.ReplaceAll(weightRaw, ",", "."), 64)
+		if err != nil || value <= 0 {
+			return ExerciseOverride{}, fmt.Errorf("вес должен быть положительным числом или -")
+		}
+		weight = &value
+	}
+	sets, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil || sets <= 0 || sets > 20 {
+		return ExerciseOverride{}, fmt.Errorf("подходы должны быть от 1 до 20")
+	}
+	reps, err := parseOverrideRepRange(parts[2])
+	if err != nil {
+		return ExerciseOverride{}, err
+	}
+	targetRIR, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(parts[3]), ",", "."), 64)
+	if err != nil || targetRIR < 0 || targetRIR > 10 {
+		return ExerciseOverride{}, fmt.Errorf("RIR должен быть от 0 до 10")
+	}
+	restRaw := strings.TrimSpace(parts[4])
+	if _, err := strconv.Atoi(restRaw); err == nil {
+		restRaw += "s"
+	}
+	rest, err := time.ParseDuration(restRaw)
+	if err != nil || rest < 0 || rest%time.Second != 0 {
+		return ExerciseOverride{}, fmt.Errorf("отдых должен быть задан как 180s или 3m")
+	}
+	return ExerciseOverride{
+		WeightKG: weight, Reps: reps, WorkingSets: sets,
+		TargetRIR: targetRIR, RestSeconds: int(rest / time.Second),
+	}, nil
+}
+
+func parseOverrideRepRange(raw string) (RepRange, error) {
+	parts := strings.Split(strings.TrimSpace(raw), "-")
+	if len(parts) > 2 {
+		return RepRange{}, fmt.Errorf("повторения должны быть числом или диапазоном 8-12")
+	}
+	min, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil || min <= 0 {
+		return RepRange{}, fmt.Errorf("повторения должны быть числом или диапазоном 8-12")
+	}
+	max := min
+	if len(parts) == 2 {
+		max, err = strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err != nil || max < min {
+			return RepRange{}, fmt.Errorf("минимум повторений не может быть больше максимума")
+		}
+	}
+	return RepRange{Min: min, Max: max}, nil
+}
+
+func (u *UseCase) finishWhenPlanComplete(
+	ctx context.Context,
+	ownerID int64,
+	session Session,
+	now time.Time,
+) (Session, error) {
+	exercise := session.CurrentExercise()
+	if exercise == nil || !exercise.PlanComplete() {
+		return session, nil
+	}
+	return u.repo.FinishCurrentExercise(ctx, ownerID, now)
+}
+
+func cloneFloat(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func (u *UseCase) AddNote(ctx context.Context, ownerID int64, raw string) (Session, error) {

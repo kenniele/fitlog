@@ -3,6 +3,7 @@ package training
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -25,6 +26,10 @@ type stateRepository struct {
 	replacementTargetID       *int64
 	replacementTargetName     string
 	replacedHistory           bool
+	activeSession             Session
+	lastSet                   SetInput
+	override                  ExerciseOverride
+	finishCalled              bool
 }
 
 func (r *stateRepository) GetUIState(context.Context, int64) (UIState, error) {
@@ -87,6 +92,49 @@ func (r *stateRepository) RenameExercise(_ context.Context, _ int64, exerciseID 
 	r.renamedID = exerciseID
 	r.renamedName = name
 	return r.renameResult, nil
+}
+
+func (r *stateRepository) ActiveSession(context.Context, int64) (Session, error) {
+	return r.activeSession, nil
+}
+
+func (r *stateRepository) AddSet(_ context.Context, _ int64, input SetInput) (Session, error) {
+	r.lastSet = input
+	session := r.activeSession
+	exercise := session.CurrentExercise()
+	actualReps := input.Reps
+	set := WorkoutSet{
+		ID: int64(len(exercise.Sets) + 1), Position: len(exercise.Sets) + 1, Type: input.Type,
+		ActualWeightKG: cloneFloat(input.WeightKG),
+		ActualReps:     &actualReps, ActualRIR: cloneFloat(input.RIR),
+		WeightKG: cloneFloat(input.WeightKG), Reps: input.Reps, RIR: cloneFloat(input.RIR),
+	}
+	exercise.Sets = append(exercise.Sets, set)
+	r.activeSession = session
+	return session, nil
+}
+
+func (r *stateRepository) FinishCurrentExercise(_ context.Context, _ int64, _ time.Time) (Session, error) {
+	r.finishCalled = true
+	session := r.activeSession
+	session.Status = "finished"
+	r.activeSession = session
+	return session, nil
+}
+
+func (r *stateRepository) OverrideCurrentExercise(_ context.Context, _ int64, override ExerciseOverride) (Session, error) {
+	r.override = override
+	session := r.activeSession
+	exercise := session.CurrentExercise()
+	exercise.Plan.WeightKG = cloneFloat(override.WeightKG)
+	exercise.Plan.MinReps = override.Reps.Min
+	exercise.Plan.MaxReps = override.Reps.Max
+	exercise.Plan.WorkingSets = override.WorkingSets
+	exercise.Plan.TargetRIR = override.TargetRIR
+	exercise.Plan.RestSeconds = override.RestSeconds
+	exercise.Overridden = true
+	r.activeSession = session
+	return session, nil
 }
 
 func TestOpenControlMessageStartsFreshCard(t *testing.T) {
@@ -251,4 +299,52 @@ func TestProgramExerciseCanBeReplacedWithNewAndHistory(t *testing.T) {
 	require.Nil(t, repo.replacementTargetID)
 	require.Equal(t, "Тяга Т-грифа", repo.replacementTargetName)
 	require.True(t, repo.replacedHistory)
+}
+
+func TestPlannedWorkingSetCollectsNullableRIRAndFinishesExercise(t *testing.T) {
+	weight := 60.0
+	repo := &stateRepository{
+		state: UIState{OwnerID: 42},
+		activeSession: Session{ID: 1, OwnerID: 42, Status: "active", CurrentPosition: 1, Exercises: []SessionExercise{{
+			ID: 2, Position: 1, Name: "Жим",
+			Plan: Recommendation{WeightKG: &weight, MinReps: 8, MaxReps: 12, WorkingSets: 1, TargetRIR: 2, RestSeconds: 180},
+		}}},
+	}
+	usecase := NewUseCase(repo)
+
+	_, err := usecase.PrepareWorkingSet(context.Background(), 42, 12)
+	require.NoError(t, err)
+	require.Equal(t, InputRIR, repo.state.Mode)
+	require.Equal(t, 12, repo.state.PendingSet.Reps)
+
+	session, err := usecase.CompletePendingSet(context.Background(), 42, nil, time.Now())
+	require.NoError(t, err)
+	require.True(t, repo.finishCalled)
+	require.False(t, session.Active())
+	require.Nil(t, repo.lastSet.RIR)
+	require.Equal(t, SetTypeWorking, repo.lastSet.Type)
+	require.Equal(t, InputNone, repo.state.Mode)
+}
+
+func TestOverrideDoesNotModifyOriginalRecommendation(t *testing.T) {
+	originalWeight := 62.5
+	repo := &stateRepository{
+		state: UIState{OwnerID: 42},
+		activeSession: Session{ID: 1, OwnerID: 42, Status: "active", CurrentPosition: 1, Exercises: []SessionExercise{{
+			ID: 2, Position: 1, Name: "Жим",
+			Recommendation: Recommendation{WeightKG: &originalWeight, MinReps: 8, MaxReps: 12, WorkingSets: 3, TargetRIR: 2},
+			Plan:           Recommendation{WeightKG: &originalWeight, MinReps: 8, MaxReps: 12, WorkingSets: 3, TargetRIR: 2},
+		}}},
+	}
+	usecase := NewUseCase(repo)
+	_, err := usecase.BeginOverride(context.Background(), 42)
+	require.NoError(t, err)
+
+	session, err := usecase.OverrideCurrentExercise(context.Background(), 42, "60;2;10-12;3;2m")
+	require.NoError(t, err)
+	require.InDelta(t, 60, *session.CurrentExercise().Plan.WeightKG, 0.001)
+	require.Equal(t, 2, session.CurrentExercise().Plan.WorkingSets)
+	require.InDelta(t, 62.5, *session.CurrentExercise().Recommendation.WeightKG, 0.001)
+	require.InDelta(t, 60, *repo.override.WeightKG, 0.001)
+	require.Equal(t, 120, repo.override.RestSeconds)
 }

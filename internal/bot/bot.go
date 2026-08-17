@@ -82,7 +82,7 @@ func New(token string, allowlist *Allowlist, deps Deps) (*Bot, error) {
 	tb.Use(allowlist.Middleware())
 	bot.registerHandlers()
 
-	// SetCommands replaces the old Telegram command menu with the two report commands.
+	// SetCommands replaces Telegram's command menu with the supported explicit workflows.
 	if err := tb.SetCommands(botCommands()); err != nil {
 		deps.Logger.Warn("set telegram commands", "err", err)
 	}
@@ -104,6 +104,7 @@ func botCommands() []tele.Command {
 		{Text: "nutrition_analysis", Description: "Анализ дефицита за последние 14 дней"},
 		{Text: "info", Description: "Здоровье и питание за выбранную дату"},
 		{Text: "connect_fatsecret", Description: "Подключить аккаунт FatSecret"},
+		{Text: "import_program", Description: "Импортировать тренировочную программу YAML"},
 	}
 }
 
@@ -116,6 +117,7 @@ func (b *Bot) registerHandlers() {
 	b.b.Handle("/nutrition_analysis", b.handleNutritionAnalysis)
 	b.b.Handle("/info", b.handleInfo)
 	b.b.Handle("/connect_fatsecret", b.sendFatSecretConnect)
+	b.b.Handle("/import_program", b.handleImportProgramCommand)
 	b.registerTrainingHandlers()
 	// Unknown text, including Telegram's conventional /start, only opens the
 	// persistent menu and does not create another bot command.

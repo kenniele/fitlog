@@ -1,0 +1,176 @@
+version: 1
+
+program:
+  name: "V-фигура · фуллбади 3 дня"
+  description: "Базовая рабочая неделя из Excel-программы. Жим гантелей лёжа заменён на жим штанги лёжа без изменения позиции и объёма."
+  days_per_week: 3
+
+defaults:
+  target_rir: 2
+  rest_between_sets: 120s
+  rest_between_exercises: 180s
+
+workouts:
+  - id: fullbody_a
+    name: "Фуллбади A"
+    exercises:
+      - exercise: "Тяга вертикального блока широким хватом"
+        sets: 4
+        reps: 8-12
+        target_rir: 1
+        weight_step: 5kg
+        rest: 180s
+        progression: double
+
+      - exercise: "Жим штанги лёжа"
+        warmup:
+          - weight: bar
+            reps: 10
+        sets: 3
+        reps: 8-12
+        target_rir: 2
+        weight_step: 2.5kg
+        rest: 180s
+        progression: double
+
+      - exercise: "Тяга горизонтального блока широким хватом"
+        sets: 3
+        reps: 10-12
+        weight_step: 5kg
+        progression: double
+
+      - exercise: "Махи гантелями в стороны"
+        sets: 4
+        reps: 12-15
+        target_rir: 1
+        weight_step: 1kg
+        rest: 90s
+        progression: double
+
+      - exercise: "Разгибания рук в блоке"
+        sets: 3
+        reps: 12-15
+        weight_step: 2.5kg
+        rest: 90s
+        progression: double
+
+      - exercise: "Разгибание ног в тренажёре"
+        sets: 3
+        reps: 12-15
+        weight_step: 5kg
+        progression: double
+
+      - exercise: "Сгибание ног в тренажёре"
+        sets: 3
+        reps: 12-15
+        weight_step: 5kg
+        progression: double
+
+  - id: fullbody_b
+    name: "Фуллбади B"
+    exercises:
+      - exercise: "Тяга вертикального блока узким/нейтр. хватом"
+        sets: 4
+        reps: 8-12
+        weight_step: 5kg
+        rest: 150s
+        progression: double
+
+      - exercise: "Жим от груди в наклоне в тренажёре"
+        sets: 3
+        reps: 8-12
+        weight_step: 5kg
+        progression: double
+
+      - exercise: "Тяга гантели к поясу с упором в скамью *"
+        sets: 3
+        reps: 10-12
+        target_rir: 1
+        weight_step: 2kg
+        rest: 180s
+        progression: double
+
+      - exercise: "Махи гантелями в стороны"
+        sets: 4
+        reps: 12-15
+        weight_step: 1kg
+        rest: 90s
+        progression: double
+
+      - exercise: "Французский жим / разгибания в блоке"
+        sets: 3
+        reps: 12-15
+        weight_step: 2.5kg
+        rest: 90s
+        progression: double
+
+      - exercise: "Разгибание ног в тренажёре"
+        sets: 3
+        reps: 12-15
+        weight_step: 5kg
+        progression: double
+
+      - exercise: "Сгибание ног в тренажёре"
+        sets: 3
+        reps: 12-15
+        weight_step: 5kg
+        progression: double
+
+  - id: fullbody_c
+    name: "Фуллбади C"
+    exercises:
+      - exercise: "Тяга вертикального блока широким хватом"
+        sets: 4
+        reps: 8-12
+        target_rir: 1
+        weight_step: 5kg
+        rest: 180s
+        progression: double
+
+      - exercise: "Махи гантелями в стороны"
+        sets: 4
+        reps: 12-15
+        target_rir: 1
+        weight_step: 1kg
+        rest: 90s
+        progression: double
+
+      - exercise: "Жим гантелей/штанги сидя (над головой)"
+        sets: 3
+        reps: 8-12
+        weight_step: 2.5kg
+        rest: 150s
+        progression: double
+
+      - exercise: "Обратные разведения (задние дельты)"
+        sets: 3
+        reps: 15-20
+        weight_step: 1kg
+        rest: 90s
+        progression: double
+
+      - exercise: "Разгибания рук в блоке"
+        sets: 3
+        reps: 12-15
+        weight_step: 2.5kg
+        rest: 90s
+        progression: double
+
+      - exercise: "Сгибания на бицепс с супинацией (опц.)"
+        sets: 2
+        reps: 10-12
+        weight_step: 2kg
+        rest: 90s
+        progression: double
+
+      - exercise: "Разгибание ног в тренажёре"
+        sets: 3
+        reps: 12-15
+        weight_step: 5kg
+        progression: double
+
+      - exercise: "Сгибание ног в тренажёре"
+        sets: 3
+        reps: 12-15
+        weight_step: 5kg
+        progression: double

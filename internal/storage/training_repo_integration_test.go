@@ -5,6 +5,7 @@ package storage
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -281,4 +282,129 @@ func TestTrainingRepo_Integration(t *testing.T) {
 	).Scan(&exercises, &sets))
 	require.Zero(t, exercises, "session exercises are deleted through cascading foreign keys")
 	require.Zero(t, sets, "training sets are deleted through cascading foreign keys")
+}
+
+func TestTrainingRepo_ProgramsV1Integration(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping integration test")
+	}
+	ctx := context.Background()
+	pool, err := NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	const ownerID int64 = 987654322
+	cleanup := func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM training_ui_states WHERE owner_id = $1`, ownerID)
+		_, _ = pool.Exec(ctx, `DELETE FROM training_sessions WHERE owner_id = $1`, ownerID)
+		_, _ = pool.Exec(ctx, `DELETE FROM training_programs WHERE owner_id = $1`, ownerID)
+		_, _ = pool.Exec(ctx, `DELETE FROM training_exercises WHERE owner_id = $1`, ownerID)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	raw := `version: 1
+program:
+  name: Test Program
+workouts:
+  - id: bench_day
+    name: Bench Day
+    exercises:
+      - exercise: Жим штанги лёжа
+        sets: 3
+        reps: 8-12
+        target_rir: 2
+        starting_weight: 60kg
+        weight_step: 2.5kg
+        rest: 180s
+        after: 180s
+        progression: double
+      - exercise: Тяга блока
+        sets: 1
+        reps: 8
+        target_rir: 2
+        starting_weight: 40kg
+        weight_step: 5kg
+        rest: 120s
+        after: 0s
+        progression: double
+`
+	programs, err := training.ParsePrograms("program.yaml", strings.NewReader(raw))
+	require.NoError(t, err)
+	require.InDelta(t, 2.5, programs[0].Prescriptions[0].WeightStepKG, 0.001)
+	repo := NewTrainingRepo(pool)
+	require.NoError(t, repo.ReplacePrograms(ctx, ownerID, programs))
+
+	templates, err := repo.ListPrograms(ctx, ownerID)
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, 1, templates[0].Revision)
+	require.Equal(t, "bench_day", templates[0].WorkoutKey)
+	startedAt := time.Date(2026, 8, 17, 8, 0, 0, 0, time.UTC)
+	first, err := repo.StartSession(ctx, ownerID, templates[0].ID, startedAt)
+	require.NoError(t, err)
+	require.NotNil(t, first.RevisionID)
+	require.InDelta(t, 60, *first.CurrentExercise().Recommendation.WeightKG, 0.001)
+	require.InDelta(t, 60, *first.CurrentExercise().Plan.WeightKG, 0.001)
+
+	rir := 2.0
+	weight := 60.0
+	for index := 0; index < 3; index++ {
+		first, err = repo.AddSet(ctx, ownerID, training.SetInput{
+			Type: training.SetTypeWorking, WeightKG: &weight, Reps: 12, RIR: &rir,
+			CompletedAt: startedAt.Add(time.Duration(index+1) * time.Minute),
+		})
+		require.NoError(t, err)
+	}
+	first, err = repo.FinishCurrentExercise(ctx, ownerID, startedAt.Add(4*time.Minute))
+	require.NoError(t, err)
+	require.True(t, first.Active())
+	require.Equal(t, 2, first.CurrentPosition)
+	require.InDelta(t, 40, *first.CurrentExercise().Plan.WeightKG, 0.001)
+	require.NotNil(t, first.RestUntil)
+	require.WithinDuration(t, startedAt.Add(7*time.Minute), *first.RestUntil, 0)
+	pullWeight := 40.0
+	first, err = repo.AddSet(ctx, ownerID, training.SetInput{
+		Type: training.SetTypeWorking, WeightKG: &pullWeight, Reps: 8, RIR: &rir,
+		CompletedAt: startedAt.Add(7 * time.Minute),
+	})
+	require.NoError(t, err)
+	first, err = repo.FinishCurrentExercise(ctx, ownerID, startedAt.Add(8*time.Minute))
+	require.NoError(t, err)
+	require.False(t, first.Active())
+
+	// Re-import creates a new immutable revision and activates its templates.
+	require.NoError(t, repo.ReplacePrograms(ctx, ownerID, programs))
+	templates, err = repo.ListPrograms(ctx, ownerID)
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, 2, templates[0].Revision)
+	require.NotEqual(t, *first.RevisionID, templates[0].RevisionID)
+
+	second, err := repo.StartSession(ctx, ownerID, templates[0].ID, startedAt.Add(7*24*time.Hour))
+	require.NoError(t, err)
+	require.InDelta(t, 62.5, *second.CurrentExercise().Recommendation.WeightKG, 0.001)
+	require.Equal(t, training.ProgressionIncrease, second.CurrentExercise().Recommendation.Action)
+	require.NotEmpty(t, second.CurrentExercise().Recommendation.ReasonCode)
+
+	overrideWeight := 60.0
+	second, err = repo.OverrideCurrentExercise(ctx, ownerID, training.ExerciseOverride{
+		WeightKG: &overrideWeight, Reps: training.RepRange{Min: 8, Max: 12},
+		WorkingSets: 3, TargetRIR: 2, RestSeconds: 180,
+	})
+	require.NoError(t, err)
+	require.InDelta(t, 62.5, *second.CurrentExercise().Recommendation.WeightKG, 0.001)
+	require.InDelta(t, 60, *second.CurrentExercise().Plan.WeightKG, 0.001)
+
+	actualWeight := 55.0
+	second, err = repo.AddSet(ctx, ownerID, training.SetInput{
+		Type: training.SetTypeWorking, WeightKG: &actualWeight, Reps: 11,
+		CompletedAt: startedAt.Add(7*24*time.Hour + time.Minute),
+	})
+	require.NoError(t, err)
+	set := second.CurrentExercise().Sets[0]
+	require.InDelta(t, 60, *set.PlannedWeightKG, 0.001)
+	require.InDelta(t, 55, *set.ActualWeightKG, 0.001)
+	require.Equal(t, 11, *set.ActualReps)
 }

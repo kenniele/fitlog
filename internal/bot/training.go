@@ -23,6 +23,10 @@ const (
 	trainingCallbackContinue                = "training_continue"
 	trainingCallbackProgram                 = "training_program"
 	trainingCallbackAddSet                  = "training_add_set"
+	trainingCallbackWarmupDone              = "training_warmup_done"
+	trainingCallbackWorkingReps             = "training_work_reps"
+	trainingCallbackRIR                     = "training_rir"
+	trainingCallbackOverride                = "training_override"
 	trainingCallbackFinishExercise          = "training_finish_exercise"
 	trainingCallbackNote                    = "training_note"
 	trainingCallbackPrograms                = "training_programs"
@@ -63,6 +67,10 @@ func (b *Bot) registerTrainingHandlers() {
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackContinue}, b.handleTrainingContinue, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackProgram}, b.handleTrainingProgram, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackAddSet}, b.handleTrainingAddSet, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackWarmupDone}, b.handleTrainingWarmupDone, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackWorkingReps}, b.handleTrainingWorkingReps, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackRIR}, b.handleTrainingRIR, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackOverride}, b.handleTrainingOverride, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackFinishExercise}, b.handleTrainingFinishExercise, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackNote}, b.handleTrainingNote, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackPrograms}, b.handleTrainingPrograms, currentCard)
@@ -91,6 +99,20 @@ func (b *Bot) registerTrainingHandlers() {
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackConfirmDelete}, b.handleTrainingConfirmDelete, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackDeleteLocal}, b.handleTrainingDeleteLocal, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackSaveOnly}, b.handleTrainingSaveOnly, currentCard)
+}
+
+func (b *Bot) handleImportProgramCommand(c tele.Context) error {
+	if b.deps.Training == nil || c.Sender() == nil || c.Chat() == nil {
+		return b.handleMenu(c)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	if err := b.deps.Training.OpenControlMessage(ctx, ownerID, c.Chat().ID); err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	b.deleteIncoming(c)
+	return b.showImportPrompt(ctx, c, ownerID, "")
 }
 
 func (b *Bot) handleTrainingButton(c tele.Context) error {
@@ -203,7 +225,115 @@ func (b *Bot) handleTrainingAddSet(c tele.Context) error {
 	if err := b.deps.Training.Expect(ctx, ownerID, training.InputSet); err != nil {
 		return b.showTrainingFailure(ctx, c, ownerID, err)
 	}
+	if exercise := session.CurrentExercise(); exercise != nil && exercise.Structured() {
+		return b.showActiveTraining(ctx, c, session, "Отправь повторы числом или фактический подход: 10 либо 10Р 60КГ")
+	}
 	return b.showActiveTraining(ctx, c, session, "Отправь: 12Р 40КГ или 12Р -")
+}
+
+func (b *Bot) handleTrainingWarmupDone(c tele.Context) error {
+	b.respond(c)
+	exerciseID, warmupPosition, err := parseTrainingPair(c.Data())
+	if err != nil || warmupPosition <= 0 {
+		return fmt.Errorf("invalid warmup callback %q", c.Data())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	session, activeErr := b.deps.Training.Active(ctx, ownerID)
+	if activeErr != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, activeErr)
+	}
+	current := session.CurrentExercise()
+	if current == nil || current.ID != exerciseID || int64(len(current.WarmupSets())+1) != warmupPosition {
+		return b.showActiveTraining(ctx, c, session, "Карточка уже обновилась")
+	}
+	session, err = b.deps.Training.CompleteWarmup(ctx, ownerID, time.Now())
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showActiveTraining(ctx, c, session, "")
+}
+
+func (b *Bot) handleTrainingWorkingReps(c tele.Context) error {
+	b.respond(c)
+	exerciseID, reps, err := parseTrainingPair(c.Data())
+	if err != nil || reps <= 0 || reps > 1000 {
+		return fmt.Errorf("invalid working set callback %q", c.Data())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	session, err := b.deps.Training.Active(ctx, ownerID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	current := session.CurrentExercise()
+	if current == nil || current.ID != exerciseID {
+		return b.showActiveTraining(ctx, c, session, "Карточка уже обновилась")
+	}
+	session, err = b.deps.Training.PrepareWorkingSet(ctx, ownerID, int(reps))
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showActiveTraining(ctx, c, session, "Какой был запас повторений?")
+}
+
+func (b *Bot) handleTrainingRIR(c tele.Context) error {
+	b.respond(c)
+	raw := strings.TrimSpace(c.Data())
+	var rir *float64
+	if raw != "skip" {
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil || value < 0 || value > 10 {
+			return fmt.Errorf("invalid RIR callback %q", raw)
+		}
+		rir = &value
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	session, err := b.deps.Training.CompletePendingSet(ctx, ownerID, rir, time.Now())
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showTrainingAfterProgress(ctx, c, session)
+}
+
+func (b *Bot) handleTrainingOverride(c tele.Context) error {
+	b.respond(c)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	if _, current, err := b.trainingCallbackExercise(ctx, c, ownerID); err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	} else if !current {
+		session, activeErr := b.deps.Training.Active(ctx, ownerID)
+		if activeErr != nil {
+			return b.showTrainingFailure(ctx, c, ownerID, activeErr)
+		}
+		return b.showActiveTraining(ctx, c, session, "Карточка уже обновилась")
+	}
+	session, err := b.deps.Training.BeginOverride(ctx, ownerID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showActiveTraining(ctx, c, session, "Измени: вес;подходы;повторы;RIR;отдых. Например: 60;3;8-12;2;180s")
+}
+
+func (b *Bot) showTrainingAfterProgress(ctx context.Context, c tele.Context, session training.Session) error {
+	if session.Active() {
+		return b.showActiveTraining(ctx, c, session, "")
+	}
+	updated, updateErr := b.updatePublishedTraining(session)
+	if updateErr != nil {
+		b.deps.Logger.Error("update published training", "err", updateErr, "session_id", session.ID)
+		return b.showFinishedTraining(ctx, c, session, "Тренировка сохранена, но публикацию обновить не удалось: "+updateErr.Error())
+	}
+	if updated {
+		return b.showFinishedTraining(ctx, c, session, "Публикация в канале обновлена.")
+	}
+	return b.showFinishedTraining(ctx, c, session, "")
 }
 
 func (b *Bot) handleTrainingNote(c tele.Context) error {
@@ -269,6 +399,24 @@ func (b *Bot) handleText(c tele.Context) error {
 	case training.InputSet:
 		raw := c.Text()
 		b.deleteIncoming(c)
+		if active, activeErr := b.deps.Training.Active(ctx, ownerID); activeErr == nil {
+			if exercise := active.CurrentExercise(); exercise != nil && exercise.Structured() {
+				reps, parseErr := strconv.Atoi(strings.TrimSpace(raw))
+				var session training.Session
+				var prepareErr error
+				if parseErr == nil && reps > 0 {
+					session, prepareErr = b.deps.Training.PrepareWorkingSet(ctx, ownerID, reps)
+				} else if actual, setErr := training.ParseSet(raw); setErr == nil {
+					session, prepareErr = b.deps.Training.PrepareWorkingSetWithWeight(ctx, ownerID, actual.Reps, actual.WeightKG)
+				} else {
+					return b.showActiveTraining(ctx, c, active, "Отправь число повторений или фактический подход: 10 либо 10Р 60КГ")
+				}
+				if prepareErr != nil {
+					return b.showTrainingFailure(ctx, c, ownerID, prepareErr)
+				}
+				return b.showActiveTraining(ctx, c, session, "Какой был запас повторений?")
+			}
+		}
 		session, err := b.deps.Training.AddSet(ctx, ownerID, raw)
 		if err != nil {
 			if active, activeErr := b.deps.Training.Active(ctx, ownerID); activeErr == nil {
@@ -289,8 +437,30 @@ func (b *Bot) handleText(c tele.Context) error {
 		}
 		return b.showActiveTraining(ctx, c, session, "")
 	case training.InputImportFile:
+		raw := stripYAMLCodeBlock(c.Text())
 		b.deleteIncoming(c)
-		return b.showImportPrompt(ctx, c, ownerID, "Нужен именно файл .txt или .csv.")
+		preview, err := b.deps.Training.PreviewImport(ctx, ownerID, "telegram-program.yaml", strings.NewReader(raw))
+		if err != nil {
+			return b.showImportPrompt(ctx, c, ownerID, "Не удалось разобрать YAML: "+err.Error())
+		}
+		return b.showImportPreview(ctx, c, ownerID, preview)
+	case training.InputRIR:
+		b.deleteIncoming(c)
+		if active, activeErr := b.deps.Training.Active(ctx, ownerID); activeErr == nil {
+			return b.showActiveTraining(ctx, c, active, "Выбери RIR кнопкой или нажми «Пропустить»")
+		}
+		return b.showTrainingFailure(ctx, c, ownerID, training.ErrNoActiveSession)
+	case training.InputOverride:
+		raw := c.Text()
+		b.deleteIncoming(c)
+		session, err := b.deps.Training.OverrideCurrentExercise(ctx, ownerID, raw)
+		if err != nil {
+			if active, activeErr := b.deps.Training.Active(ctx, ownerID); activeErr == nil {
+				return b.showActiveTraining(ctx, c, active, "Не удалось изменить: "+err.Error())
+			}
+			return b.showTrainingFailure(ctx, c, ownerID, err)
+		}
+		return b.showActiveTraining(ctx, c, session, "Рекомендация изменена только для этой тренировки")
 	case training.InputRename:
 		raw := c.Text()
 		b.deleteIncoming(c)
@@ -369,9 +539,9 @@ func (b *Bot) handleTrainingDocument(c tele.Context) error {
 	document := c.Message().Document
 	filename := document.FileName
 	ext := strings.ToLower(filepath.Ext(filename))
-	if ext != ".txt" && ext != ".csv" {
+	if ext != ".txt" && ext != ".csv" && ext != ".yaml" && ext != ".yml" {
 		b.deleteIncoming(c)
-		return b.showImportPrompt(ctx, c, ownerID, "Поддерживаются только файлы .txt и .csv.")
+		return b.showImportPrompt(ctx, c, ownerID, "Поддерживаются файлы .yaml, .yml, .txt и .csv.")
 	}
 	if document.FileSize > maxTrainingImportBytes {
 		b.deleteIncoming(c)
@@ -1031,6 +1201,61 @@ func (b *Bot) showActiveTraining(ctx context.Context, c tele.Context, session tr
 	exerciseID := strconv.FormatInt(exercise.ID, 10)
 	sessionID := strconv.FormatInt(session.ID, 10)
 	markup := &tele.ReplyMarkup{}
+	if exercise.Structured() {
+		state, stateErr := b.deps.Training.State(ctx, session.OwnerID)
+		if stateErr != nil {
+			return b.showTrainingFailure(ctx, c, session.OwnerID, stateErr)
+		}
+		rows := make([]tele.Row, 0, 6)
+		if state.Mode == training.InputRIR && state.PendingSet != nil {
+			rows = append(rows,
+				markup.Row(
+					markup.Data("RIR 0", trainingCallbackRIR, "0"),
+					markup.Data("RIR 1", trainingCallbackRIR, "1"),
+					markup.Data("RIR 2", trainingCallbackRIR, "2"),
+				),
+				markup.Row(
+					markup.Data("RIR 3", trainingCallbackRIR, "3"),
+					markup.Data("RIR 4+", trainingCallbackRIR, "4"),
+					markup.Data("Пропустить", trainingCallbackRIR, "skip"),
+				),
+			)
+		} else if len(exercise.WarmupSets()) < len(exercise.Warmup) {
+			nextIndex := len(exercise.WarmupSets())
+			next := exercise.Warmup[nextIndex]
+			label := fmt.Sprintf("✅ Разминка: %d повторов", next.Reps)
+			rows = append(rows, markup.Row(markup.Data(
+				label, trainingCallbackWarmupDone, trainingPair(exercise.ID, int64(nextIndex+1)),
+			)))
+		} else if len(exercise.WorkingSets()) < exercise.Plan.WorkingSets {
+			if exercise.Plan.WeightKG == nil {
+				rows = append(rows, markup.Row(markup.Data("✏️ Указать рабочий вес", trainingCallbackOverride, exerciseID)))
+			} else {
+				var repsRow tele.Row
+				for reps := exercise.Plan.MinReps; reps <= exercise.Plan.MaxReps && reps-exercise.Plan.MinReps < 5; reps++ {
+					repsRow = append(repsRow, markup.Data(
+						strconv.Itoa(reps), trainingCallbackWorkingReps, trainingPair(exercise.ID, int64(reps)),
+					))
+				}
+				if len(repsRow) > 0 {
+					rows = append(rows, repsRow)
+				}
+				rows = append(rows, markup.Row(markup.Data("Другой вес / повторы", trainingCallbackAddSet, exerciseID)))
+			}
+		}
+		rows = append(rows,
+			markup.Row(
+				markup.Data("✏️ Изменить рекомендацию", trainingCallbackOverride, exerciseID),
+				markup.Data("📝 Заметка", trainingCallbackNote, exerciseID),
+			),
+			markup.Row(markup.Data("⏭ Завершить упражнение", trainingCallbackFinishExercise, exerciseID)),
+			markup.Row(markup.Data("🗑 Удалить тренировку", trainingCallbackDelete, sessionID)),
+		)
+		markup.Inline(rows...)
+		return b.editTrainingCard(ctx, c, session.OwnerID,
+			training.FormatActiveCard(session, previous, b.deps.Location, prompt), markup,
+		)
+	}
 	markup.Inline(
 		markup.Row(
 			markup.Data("➕ Подход", trainingCallbackAddSet, exerciseID),
@@ -1416,8 +1641,8 @@ func (b *Bot) showImportPrompt(ctx context.Context, c tele.Context, ownerID int6
 	if err := b.deps.Training.Expect(ctx, ownerID, training.InputImportFile); err != nil {
 		return b.showTrainingFailure(ctx, c, ownerID, err)
 	}
-	text := "<b>📎 Импорт программ</b>\n\nОтправь файл .txt или .csv размером до 1 МБ.\n\n" +
-		"TXT: первая строка блока — название программы, остальные — упражнения. Блоки разделяются пустой строкой."
+	text := "<b>📥 Импорт программы</b>\n\nОтправь YAML файлом, обычным сообщением или код-блоком. Также поддерживаются старые .txt и .csv до 1 МБ.\n\n" +
+		"YAML version 1 может содержать несколько тренировочных дней, назначения, разминку, отдых и double progression."
 	if notice != "" {
 		text += "\n\n<b>" + html.EscapeString(notice) + "</b>"
 	}
@@ -1428,17 +1653,24 @@ func (b *Bot) showImportPrompt(ctx context.Context, c tele.Context, ownerID int6
 
 func (b *Bot) showImportPreview(ctx context.Context, c tele.Context, ownerID int64, preview training.ImportPreview) error {
 	var text strings.Builder
-	fmt.Fprintf(&text, "<b>📎 %s</b>\n", html.EscapeString(preview.Filename))
+	fmt.Fprintf(&text, "<b>📥 Найдена программа</b>\n\n%s\n", html.EscapeString(preview.Filename))
 	exercises := 0
 	for _, program := range preview.Programs {
 		exercises += len(program.Exercises)
-		fmt.Fprintf(&text, "\n• %s — %d упр.", html.EscapeString(program.Name), len(program.Exercises))
+		label := program.Name
+		if program.WorkoutKey != "" {
+			label = program.WorkoutKey + " — " + label
+		}
+		fmt.Fprintf(&text, "\n• %s — %d упр.", html.EscapeString(label), len(program.Exercises))
 	}
-	fmt.Fprintf(&text, "\n\nНайдено программ: %d\nУпражнений: %d", len(preview.Programs), exercises)
-	text.WriteString("\n\nПрограммы с совпадающими названиями будут заменены. Остальные сохранятся.")
+	if len(preview.Programs) > 0 && preview.Programs[0].PlanName != "" {
+		fmt.Fprintf(&text, "\n\n<b>%s</b>", html.EscapeString(preview.Programs[0].PlanName))
+	}
+	fmt.Fprintf(&text, "\nТренировок: %d\nУпражнений: %d", len(preview.Programs), exercises)
+	text.WriteString("\n\nПосле подтверждения будет создана новая revision. Старые тренировки не изменятся.")
 	markup := &tele.ReplyMarkup{}
 	markup.Inline(
-		markup.Row(markup.Data("🔎 Проверить упражнения", trainingCallbackConfirmImport)),
+		markup.Row(markup.Data("✅ Проверить и импортировать", trainingCallbackConfirmImport)),
 		markup.Row(markup.Data("‹ Отмена", trainingCallbackHome)),
 	)
 	return b.editTrainingCard(ctx, c, ownerID, text.String(), markup)
@@ -1506,6 +1738,10 @@ func (b *Bot) trainingPrompt(ctx context.Context, ownerID int64) string {
 	switch state.Mode {
 	case training.InputSet:
 		return "Отправь: 12Р 40КГ или 12Р -"
+	case training.InputRIR:
+		return "Выбери RIR кнопкой или пропусти"
+	case training.InputOverride:
+		return "Измени: вес;подходы;повторы;RIR;отдых"
 	case training.InputNote:
 		return "Отправь заметку для этого упражнения"
 	default:
@@ -1591,6 +1827,22 @@ func parseTrainingPage(raw string) (int, error) {
 		return 0, fmt.Errorf("page must be positive")
 	}
 	return page, nil
+}
+
+func stripYAMLCodeBlock(raw string) string {
+	value := strings.TrimSpace(raw)
+	if !strings.HasPrefix(value, "```") {
+		return value
+	}
+	lines := strings.Split(value, "\n")
+	if len(lines) < 2 {
+		return value
+	}
+	lines = lines[1:]
+	if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "```" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func trainingPair(first, second int64) string {

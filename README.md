@@ -56,6 +56,7 @@ In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀*
 | `/nutrition_analysis` | Average intake, deficit, protein, and calculated weekly weight change for 14 completed days |
 | `/info YYYY-MM-DD` | Whoop and FatSecret report for a selected calendar day |
 | `/connect_fatsecret` | Authorize or replace the connected FatSecret account |
+| `/import_program` | Import a versioned strength program from YAML text or a file |
 
 The provider modules expose the same application pipeline: `Fetch → Transform → Format`. Telegram handlers only select a request and deliver the formatted result.
 
@@ -68,9 +69,51 @@ Press **Тренировка 🏋️** to open a single control message. Inline 
 12Р -
 ```
 
-The first form records external weight; the dash records bodyweight. Letter case, decimal comma/dot, and the common hyphen/dash characters are normalized. The temporary input message is deleted after it is processed. Each exercise has **Подход**, **Конец упражнения**, **Заметка**, and **Исправить** actions. Reopening an exercise preserves its existing sets and note, and finishing it continues with the next exercise that is still incomplete. The active card also shows the same exercise's sets from the most recent earlier completed workout. Active and completed workouts can be deleted after an explicit confirmation; deleting a published workout removes its channel message first. If Telegram refuses to remove the post, a separate confirmation can delete only the Fitlog record and leave the channel untouched. Active state and the control-message ID are stored in PostgreSQL, so a workout can resume after an app restart.
+The first form records external weight; the dash records bodyweight. Letter case, decimal comma/dot, and the common hyphen/dash characters are normalized. The temporary input message is deleted after it is processed. Legacy workouts keep the manual **Подход** flow. A structured YAML workout instead shows one next action: the next warm-up set or the repetition buttons for the next working set, followed by nullable RIR buttons. Reaching the planned final working set advances to the next exercise and finishing the final exercise completes the workout automatically.
 
-Programs can be imported from a UTF-8 TXT file. A blank line separates programs, the first line of each block is the program name, and the remaining lines are ordered exercises:
+Structured sessions snapshot the active program revision, recommendation, warm-up plan, rep range, RIR target, weight step, and rest settings. Editing or re-importing a program cannot rewrite an already-started session. Each completed set stores its planned and actual weight/reps/RIR separately, plus `completed_at` and `rest_until`. The recommendation can be overridden for the current session with `weight;sets;reps;RIR;rest`, for example `60;3;8-12;2;180s`; the template and original recommendation remain unchanged.
+
+Reopening an exercise preserves its existing sets and note. The active card also shows the same exercise's sets from the most recent earlier completed workout. Active and completed workouts can be deleted after an explicit confirmation; deleting a published workout removes its channel message first. If Telegram refuses to remove the post, a separate confirmation can delete only the Fitlog record and leave the channel untouched. Active state and the control-message ID are stored in PostgreSQL, so a workout can resume after an app restart.
+
+### Versioned YAML programs
+
+Use `/import_program`, then send a `.yaml` / `.yml` file, plain YAML, or a fenced YAML code block. The import is fully validated and previewed before it creates a new revision. Stable workout IDs survive display-name changes. The active revision supplies new sessions; historical sessions retain their original revision and snapshot.
+
+```yaml
+version: 1
+
+program:
+  name: "Test Program"
+  description: "Three strength days"
+  days_per_week: 3
+
+defaults:
+  target_rir: 2
+  rest_between_sets: 120s
+  rest_between_exercises: 180s
+
+workouts:
+  - id: bench_day
+    name: "Bench Day"
+    exercises:
+      - exercise: "Жим штанги лёжа"
+        warmup:
+          - weight: bar
+            reps: 10
+          - weight: 40kg
+            reps: 6
+        sets: 3
+        reps: 8-12
+        starting_weight: 60kg
+        weight_step: 2.5kg
+        rest: 180s
+        after: 180s
+        progression: double
+```
+
+Version 1 supports deterministic double progression. The working weight increases only when the latest completed workout has exactly the planned number of working sets, every set reaches the top of the rep range, and no known RIR is below the target. Missing RIR does not block progression; warm-up sets never participate. Every recommendation persists a machine-readable reason code and a Russian explanation.
+
+Legacy programs can still be imported from a UTF-8 TXT file. A blank line separates programs, the first line of each block is the program name, and the remaining lines are ordered exercises:
 
 ```text
 Понедельник

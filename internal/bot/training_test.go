@@ -31,6 +31,14 @@ func TestTrainingPairRoundTrip(t *testing.T) {
 	require.LessOrEqual(t, len("\f"+trainingCallbackProgramExerciseExisting+"|"+maxID), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackProgramExerciseHistory), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackImportExisting+"|"+maxID), 64)
+	require.LessOrEqual(t, len("\f"+trainingCallbackWorkingReps+"|"+payload), 64)
+	require.LessOrEqual(t, len("\f"+trainingCallbackWarmupDone+"|"+payload), 64)
+}
+
+func TestStripYAMLCodeBlock(t *testing.T) {
+	raw := "```yaml\nversion: 1\nprogram:\n  name: Test\n```"
+	require.Equal(t, "version: 1\nprogram:\n  name: Test", stripYAMLCodeBlock(raw))
+	require.Equal(t, "version: 1", stripYAMLCodeBlock(" version: 1 "))
 }
 
 func TestParseTrainingPage(t *testing.T) {
