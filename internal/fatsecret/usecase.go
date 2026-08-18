@@ -71,11 +71,15 @@ type Report struct {
 	Groups  []MealGroup
 
 	LoggedDays int
-	Calories   float64
-	Protein    float64
-	Fat        float64
-	Carbs      float64
-	Analysis   *domain.NutritionAnalysis
+	// LatestAvailableDateInt is populated by the monthly fallback when the
+	// requested daily endpoint is empty. It lets the UI distinguish API lag
+	// from a genuinely empty diary.
+	LatestAvailableDateInt int
+	Calories               float64
+	Protein                float64
+	Fat                    float64
+	Carbs                  float64
+	Analysis               *domain.NutritionAnalysis
 }
 
 type Source interface {
@@ -151,6 +155,9 @@ func (u *UseCase) Transform(in FetchedReport) Report {
 		if len(in.Entries) == 0 {
 			requestedDate := ToDateInt(in.Request.From)
 			for _, day := range in.Days {
+				if day.DateInt > out.LatestAvailableDateInt {
+					out.LatestAvailableDateInt = day.DateInt
+				}
 				if day.DateInt != requestedDate {
 					continue
 				}
@@ -265,6 +272,13 @@ func (u *UseCase) formatDaily(r Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "🥑 *Питание · %s*\n\n", reportfmt.Escape(reportfmt.DateLong(r.Request.From, u.loc)))
 	if len(r.Groups) == 0 && r.LoggedDays == 0 {
+		if r.LatestAvailableDateInt > 0 && r.LatestAvailableDateInt < ToDateInt(r.Request.From) {
+			utcDate := FromDateInt(r.LatestAvailableDateInt)
+			latest := time.Date(utcDate.Year(), utcDate.Month(), utcDate.Day(), 0, 0, 0, 0, u.loc)
+			fmt.Fprintf(&b, "FatSecret API ещё не опубликовал данные за этот день\\. Последняя доступная дата — %s\\. Попробуй позже\\.",
+				reportfmt.Escape(reportfmt.DateLong(latest, u.loc)))
+			return b.String()
+		}
 		b.WriteString("Записей за выбранный день нет\\.")
 		return b.String()
 	}

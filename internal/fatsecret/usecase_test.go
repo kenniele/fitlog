@@ -59,6 +59,20 @@ func TestUseCaseDailyFallsBackToMonthlyTotals(t *testing.T) {
 	require.Contains(t, output, "без детализации приёмов пищи")
 }
 
+func TestUseCaseDailyExplainsProviderLag(t *testing.T) {
+	requested := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	source := reportSource{days: []domain.DailyNutrition{
+		{DateInt: ToDateInt(requested.AddDate(0, 0, -2)), Calories: 2200},
+		{DateInt: ToDateInt(requested.AddDate(0, 0, -1)), Calories: 2300},
+	}}
+	u := NewUseCase(source, time.UTC)
+
+	output, err := u.Execute(context.Background(), Day(requested, time.UTC))
+	require.NoError(t, err)
+	require.Contains(t, output, "FatSecret API ещё не опубликовал данные")
+	require.Contains(t, output, "Последняя доступная дата — 16 августа 2026")
+}
+
 func TestUseCaseSummaryUsesOnlyRequestedDays(t *testing.T) {
 	from := time.Date(2026, 6, 22, 0, 0, 0, 0, time.UTC)
 	source := reportSource{days: []domain.DailyNutrition{

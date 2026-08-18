@@ -325,6 +325,7 @@ func (b *Bot) executeFatSecret(ctx context.Context, req fatsecret.ReportRequest)
 		"days_received", len(fetched.Days),
 		"daily_fallback_used", dailyFallbackUsed,
 		"fallback_date_found", fallbackDateFound,
+		"latest_available_date_int", transformed.LatestAvailableDateInt,
 		"days_in_period", transformed.LoggedDays,
 		"meal_groups", len(transformed.Groups),
 		"calories", transformed.Calories,
