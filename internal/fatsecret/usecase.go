@@ -118,6 +118,13 @@ func (u *UseCase) Fetch(ctx context.Context, req ReportRequest) (FetchedReport, 
 			return FetchedReport{}, fmt.Errorf("fetch food entries: %w", err)
 		}
 		out.Entries = entries
+		if len(entries) == 0 {
+			days, err := u.source.FoodEntriesMonth(ctx, req.From)
+			if err != nil {
+				return FetchedReport{}, fmt.Errorf("fetch daily nutrition fallback: %w", err)
+			}
+			out.Days = days
+		}
 		return out, nil
 	}
 
@@ -141,6 +148,21 @@ func (u *UseCase) Fetch(ctx context.Context, req ReportRequest) (FetchedReport, 
 func (u *UseCase) Transform(in FetchedReport) Report {
 	out := Report{Request: in.Request}
 	if in.Request.Mode == DailyReport {
+		if len(in.Entries) == 0 {
+			requestedDate := ToDateInt(in.Request.From)
+			for _, day := range in.Days {
+				if day.DateInt != requestedDate {
+					continue
+				}
+				out.Calories = day.Calories
+				out.Protein = day.Protein
+				out.Fat = day.Fat
+				out.Carbs = day.Carbs
+				out.LoggedDays = 1
+				break
+			}
+			return out
+		}
 		groups := make(map[domain.MealKind]*MealGroup)
 		for _, entry := range in.Entries {
 			group := groups[entry.Meal]
@@ -242,13 +264,17 @@ func (u *UseCase) Execute(ctx context.Context, req ReportRequest) (string, error
 func (u *UseCase) formatDaily(r Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "🥑 *Питание · %s*\n\n", reportfmt.Escape(reportfmt.DateLong(r.Request.From, u.loc)))
-	if len(r.Groups) == 0 {
+	if len(r.Groups) == 0 && r.LoggedDays == 0 {
 		b.WriteString("Записей за выбранный день нет\\.")
 		return b.String()
 	}
 	fmt.Fprintf(&b, "*Итого:* %s kcal · Б %s · Ж %s · У %s\n\n",
 		reportfmt.Number(r.Calories, 0), reportfmt.Number(r.Protein, 1),
 		reportfmt.Number(r.Fat, 1), reportfmt.Number(r.Carbs, 1))
+	if len(r.Groups) == 0 {
+		b.WriteString("FatSecret вернул итог за день без детализации приёмов пищи\\.")
+		return b.String()
+	}
 	for _, group := range r.Groups {
 		fmt.Fprintf(&b, "%s *%s* — %s kcal · Б %s · Ж %s · У %s\n",
 			mealIcon(group.Kind), reportfmt.Escape(mealName(group.Kind)), reportfmt.Number(group.Calories, 0),

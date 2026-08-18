@@ -309,11 +309,28 @@ func (b *Bot) executeFatSecret(ctx context.Context, req fatsecret.ReportRequest)
 	}
 
 	transformed := b.deps.FatSecret.Transform(fetched)
+	dailyFallbackUsed := req.Mode == fatsecret.DailyReport && len(fetched.Entries) == 0 && len(fetched.Days) > 0
+	fallbackDateFound := false
+	if dailyFallbackUsed {
+		requestedDate := fatsecret.ToDateInt(req.From)
+		for _, day := range fetched.Days {
+			if day.DateInt == requestedDate {
+				fallbackDateFound = true
+				break
+			}
+		}
+	}
 	attrs = append(attrs,
 		"entries_received", len(fetched.Entries),
 		"days_received", len(fetched.Days),
+		"daily_fallback_used", dailyFallbackUsed,
+		"fallback_date_found", fallbackDateFound,
 		"days_in_period", transformed.LoggedDays,
+		"meal_groups", len(transformed.Groups),
 		"calories", transformed.Calories,
+		"protein", transformed.Protein,
+		"fat", transformed.Fat,
+		"carbs", transformed.Carbs,
 	)
 	b.deps.Logger.Info("fatsecret request completed", attrs...)
 	return b.deps.FatSecret.Format(transformed), nil

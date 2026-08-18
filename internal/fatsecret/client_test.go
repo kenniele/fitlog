@@ -56,10 +56,10 @@ func TestClient_ProfileGet_HappyPath(t *testing.T) {
 func TestClient_FoodEntriesForDay(t *testing.T) {
 	var capturedDate string
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		form, _ := url.ParseQuery(string(body))
-		capturedDate = form.Get("date")
-		require.Equal(t, "food_entries.get.v2", form.Get("method"))
+		require.Equal(t, http.MethodGet, r.Method)
+		capturedDate = r.URL.Query().Get("date")
+		require.Empty(t, r.URL.Query().Get("method"))
+		require.NotEmpty(t, r.URL.Query().Get("oauth_signature"))
 		_, _ = w.Write([]byte(`{"food_entries":{"food_entry":{"food_entry_id":"1","food_entry_name":"Egg","date_int":"20585","meal":"Breakfast","calories":"70"}}}`))
 	})
 

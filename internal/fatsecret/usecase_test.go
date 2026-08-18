@@ -46,6 +46,19 @@ func TestYesterdayRequestUsesPreviousCalendarDay(t *testing.T) {
 	require.Equal(t, "2026-07-22", request.To.Format("2006-01-02"))
 }
 
+func TestUseCaseDailyFallsBackToMonthlyTotals(t *testing.T) {
+	day := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	source := reportSource{days: []domain.DailyNutrition{
+		{DateInt: ToDateInt(day), Calories: 2345, Protein: 210, Fat: 68, Carbs: 220},
+	}}
+	u := NewUseCase(source, time.UTC)
+
+	output, err := u.Execute(context.Background(), Day(day, time.UTC))
+	require.NoError(t, err)
+	require.Contains(t, output, "*Итого:* 2345 kcal · Б 210 · Ж 68 · У 220")
+	require.Contains(t, output, "без детализации приёмов пищи")
+}
+
 func TestUseCaseSummaryUsesOnlyRequestedDays(t *testing.T) {
 	from := time.Date(2026, 6, 22, 0, 0, 0, 0, time.UTC)
 	source := reportSource{days: []domain.DailyNutrition{

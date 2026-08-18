@@ -110,7 +110,7 @@ func run(parent context.Context) error {
 
 	// FatSecret
 	fsProvider := fatsecret.NewTokenProvider(tokenStore, cfg.FatSecretConsumerKey, cfg.FatSecretConsumerSecret,
-		cfg.FatSecretAccessToken, cfg.FatSecretAccessSecret)
+		cfg.FatSecretAccessToken, cfg.FatSecretAccessSecret, logger)
 	fsReports := fatsecret.NewUseCase(fsProvider, loc, fatsecret.ReportOptions{EstimatedTDEE: cfg.NutritionEstimatedTDEE})
 	articleReports := obsidian.NewUseCase(cfg.ObsidianArticlesPath, articleCipher)
 
