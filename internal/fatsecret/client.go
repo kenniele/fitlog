@@ -115,10 +115,11 @@ func (c *Client) ProfileGet(ctx context.Context) (string, error) {
 	return p.Profile.UserID, nil
 }
 
-// FoodEntriesForDay calls `food_entries.get` for a single day.
+// FoodEntriesForDay calls the latest v2 diary endpoint. V2 guarantees a JSON
+// array for food_entry, including the single-entry case.
 func (c *Client) FoodEntriesForDay(ctx context.Context, day time.Time) ([]domain.MealEntry, error) {
 	body, err := c.do(ctx, map[string]string{
-		"method": "food_entries.get",
+		"method": "food_entries.get.v2",
 		"date":   strconv.Itoa(ToDateInt(day)),
 	})
 	if err != nil {

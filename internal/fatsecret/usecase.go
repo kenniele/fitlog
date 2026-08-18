@@ -243,7 +243,7 @@ func (u *UseCase) formatDaily(r Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "🥑 *Питание · %s*\n\n", reportfmt.Escape(reportfmt.DateLong(r.Request.From, u.loc)))
 	if len(r.Groups) == 0 {
-		b.WriteString("Записей за сегодня нет\\.")
+		b.WriteString("Записей за выбранный день нет\\.")
 		return b.String()
 	}
 	fmt.Fprintf(&b, "*Итого:* %s kcal · Б %s · Ж %s · У %s\n\n",

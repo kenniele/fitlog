@@ -296,6 +296,7 @@ func (b *Bot) executeFatSecret(ctx context.Context, req fatsecret.ReportRequest)
 		"mode", fatSecretMode(req.Mode),
 		"from", req.From.Format("2006-01-02"),
 		"to_exclusive", req.To.Format("2006-01-02"),
+		"from_date_int", fatsecret.ToDateInt(req.From),
 	}
 	b.deps.Logger.Info("fatsecret request started", attrs...)
 

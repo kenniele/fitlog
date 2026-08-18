@@ -52,7 +52,7 @@ func (e *foodEntryDTO) toDomain() domain.MealEntry {
 	}
 }
 
-// parseFoodEntries decodes a `food_entries.get` response into domain MealEntries.
+// parseFoodEntries decodes a `food_entries.get.v2` response into domain MealEntries.
 func parseFoodEntries(body []byte) ([]domain.MealEntry, error) {
 	var env foodEntriesResponse
 	if err := json.Unmarshal(body, &env); err != nil {

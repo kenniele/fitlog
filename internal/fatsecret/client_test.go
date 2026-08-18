@@ -59,7 +59,7 @@ func TestClient_FoodEntriesForDay(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		form, _ := url.ParseQuery(string(body))
 		capturedDate = form.Get("date")
-		require.Equal(t, "food_entries.get", form.Get("method"))
+		require.Equal(t, "food_entries.get.v2", form.Get("method"))
 		_, _ = w.Write([]byte(`{"food_entries":{"food_entry":{"food_entry_id":"1","food_entry_name":"Egg","date_int":"20585","meal":"Breakfast","calories":"70"}}}`))
 	})
 
