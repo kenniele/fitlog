@@ -407,4 +407,13 @@ workouts:
 	require.InDelta(t, 60, *set.PlannedWeightKG, 0.001)
 	require.InDelta(t, 55, *set.ActualWeightKG, 0.001)
 	require.Equal(t, 11, *set.ActualReps)
+
+	second, err = repo.AddSet(ctx, ownerID, training.SetInput{
+		Type: training.SetTypeWorking, WeightKG: &actualWeight, Reps: 10,
+		CompletedAt: startedAt.Add(7*24*time.Hour + 2*time.Minute),
+	})
+	require.NoError(t, err)
+	set = second.CurrentExercise().Sets[1]
+	require.InDelta(t, 55, *set.PlannedWeightKG, 0.001)
+	require.InDelta(t, 55, *set.ActualWeightKG, 0.001)
 }

@@ -33,6 +33,7 @@ func TestTrainingPairRoundTrip(t *testing.T) {
 	require.LessOrEqual(t, len("\f"+trainingCallbackImportExisting+"|"+maxID), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackWorkingReps+"|"+payload), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackWarmupDone+"|"+payload), 64)
+	require.LessOrEqual(t, len("\f"+trainingCallbackAddWarmup+"|"+maxID), 64)
 }
 
 func TestStripYAMLCodeBlock(t *testing.T) {

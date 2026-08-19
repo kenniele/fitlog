@@ -1039,15 +1039,34 @@ func (r *TrainingRepo) AddSet(ctx context.Context, ownerID int64, input training
 	if completedAt.IsZero() {
 		completedAt = time.Now()
 	}
-	var planWeight, targetRIR pgtype.Float8
+	var planWeight, previousWorkingWeight, targetRIR pgtype.Float8
 	var minReps, maxReps, restSeconds pgtype.Int4
+	var hasPreviousWorkingSet bool
 	if err := tx.QueryRow(ctx, `
 		SELECT planned_weight_kg::double precision, planned_min_reps, planned_max_reps,
 		       planned_target_rir::double precision,
-		       planned_rest_seconds
+		       planned_rest_seconds,
+		       (
+		           SELECT actual_weight_kg::double precision
+		           FROM training_sets
+		           WHERE session_exercise_id = training_session_exercises.id
+		             AND type = 'working'
+		             AND completed_at IS NOT NULL
+		             AND actual_reps IS NOT NULL
+		           ORDER BY position DESC
+		           LIMIT 1
+		       ),
+		       EXISTS (
+		           SELECT 1
+		           FROM training_sets
+		           WHERE session_exercise_id = training_session_exercises.id
+		             AND type = 'working'
+		             AND completed_at IS NOT NULL
+		             AND actual_reps IS NOT NULL
+		       )
 		FROM training_session_exercises
 		WHERE id = $1`, exerciseID,
-	).Scan(&planWeight, &minReps, &maxReps, &targetRIR, &restSeconds); err != nil {
+	).Scan(&planWeight, &minReps, &maxReps, &targetRIR, &restSeconds, &previousWorkingWeight, &hasPreviousWorkingSet); err != nil {
 		return training.Session{}, fmt.Errorf("select set plan: %w", err)
 	}
 	var plannedWeight any
@@ -1057,7 +1076,11 @@ func (r *TrainingRepo) AddSet(ctx context.Context, ownerID int64, input training
 		plannedWeight = input.WeightKG
 		plannedMin, plannedMax = input.Reps, input.Reps
 	} else {
-		if planWeight.Valid {
+		if hasPreviousWorkingSet {
+			if previousWorkingWeight.Valid {
+				plannedWeight = previousWorkingWeight.Float64
+			}
+		} else if planWeight.Valid {
 			plannedWeight = planWeight.Float64
 		}
 		if minReps.Valid {

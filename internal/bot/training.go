@@ -23,6 +23,7 @@ const (
 	trainingCallbackContinue                = "training_continue"
 	trainingCallbackProgram                 = "training_program"
 	trainingCallbackAddSet                  = "training_add_set"
+	trainingCallbackAddWarmup               = "training_add_warmup"
 	trainingCallbackWarmupDone              = "training_warmup_done"
 	trainingCallbackWorkingReps             = "training_work_reps"
 	trainingCallbackRIR                     = "training_rir"
@@ -67,6 +68,7 @@ func (b *Bot) registerTrainingHandlers() {
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackContinue}, b.handleTrainingContinue, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackProgram}, b.handleTrainingProgram, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackAddSet}, b.handleTrainingAddSet, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackAddWarmup}, b.handleTrainingAddWarmup, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackWarmupDone}, b.handleTrainingWarmupDone, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackWorkingReps}, b.handleTrainingWorkingReps, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackRIR}, b.handleTrainingRIR, currentCard)
@@ -229,6 +231,25 @@ func (b *Bot) handleTrainingAddSet(c tele.Context) error {
 		return b.showActiveTraining(ctx, c, session, "Отправь повторы числом или фактический подход: 10 либо 10Р 60КГ")
 	}
 	return b.showActiveTraining(ctx, c, session, "Отправь: 12Р 40КГ или 12Р -")
+}
+
+func (b *Bot) handleTrainingAddWarmup(c tele.Context) error {
+	b.respond(c)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	session, current, err := b.trainingCallbackExercise(ctx, c, ownerID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	if !current {
+		return b.showActiveTraining(ctx, c, session, "Карточка уже обновилась")
+	}
+	session, err = b.deps.Training.BeginWarmup(ctx, ownerID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showActiveTraining(ctx, c, session, "Отправь разминочный подход: 10Р 20КГ или 10Р -")
 }
 
 func (b *Bot) handleTrainingWarmupDone(c tele.Context) error {
@@ -396,6 +417,17 @@ func (b *Bot) handleText(c tele.Context) error {
 		return b.handleMenu(c)
 	}
 	switch state.Mode {
+	case training.InputWarmup:
+		raw := c.Text()
+		b.deleteIncoming(c)
+		session, err := b.deps.Training.AddWarmup(ctx, ownerID, raw, time.Now())
+		if err != nil {
+			if active, activeErr := b.deps.Training.Active(ctx, ownerID); activeErr == nil {
+				return b.showActiveTraining(ctx, c, active, "Не понял разминку: "+err.Error()+". Отправь, например: 10Р 20КГ")
+			}
+			return b.showTrainingFailure(ctx, c, ownerID, err)
+		}
+		return b.showActiveTraining(ctx, c, session, "")
 	case training.InputSet:
 		raw := c.Text()
 		b.deleteIncoming(c)
@@ -863,13 +895,14 @@ func (b *Bot) handleTrainingHistory(c tele.Context) error {
 		text.WriteString("\nЗавершённых тренировок пока нет.")
 	} else {
 		for _, session := range page.Items {
-			sets := 0
-			for _, exercise := range session.Exercises {
-				sets += len(exercise.Sets)
+			working, warmup := session.SetCounts()
+			setsLabel := fmt.Sprintf("%d подх.", working)
+			if warmup > 0 {
+				setsLabel = fmt.Sprintf("%d раб. + %d разм.", working, warmup)
 			}
-			fmt.Fprintf(&text, "\n• %s · %s · %d подх. · %s",
+			fmt.Fprintf(&text, "\n• %s · %s · %s · %s",
 				session.StartedAt.In(b.deps.Location).Format("02.01.2006"),
-				html.EscapeString(session.ProgramName), sets,
+				html.EscapeString(session.ProgramName), setsLabel,
 				html.EscapeString(training.FormatSessionDuration(session)),
 			)
 			label := session.StartedAt.In(b.deps.Location).Format("02.01") + " · " + session.ProgramName
@@ -1240,7 +1273,10 @@ func (b *Bot) showActiveTraining(ctx context.Context, c tele.Context, session tr
 				label, trainingCallbackWarmupDone, trainingPair(exercise.ID, int64(nextIndex+1)),
 			)))
 		} else if len(exercise.WorkingSets()) < exercise.Plan.WorkingSets {
-			if exercise.Plan.WeightKG == nil {
+			if len(exercise.WorkingSets()) == 0 {
+				rows = append(rows, markup.Row(markup.Data("➕ Разминочный подход", trainingCallbackAddWarmup, exerciseID)))
+			}
+			if exercise.NextWorkingWeightKG() == nil {
 				rows = append(rows, markup.Row(markup.Data("✏️ Указать рабочий вес", trainingCallbackOverride, exerciseID)))
 			} else {
 				var repsRow tele.Row

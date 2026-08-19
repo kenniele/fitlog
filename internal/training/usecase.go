@@ -536,6 +536,53 @@ func (u *UseCase) CompleteWarmup(ctx context.Context, ownerID int64, now time.Ti
 	return updated, nil
 }
 
+func (u *UseCase) BeginWarmup(ctx context.Context, ownerID int64) (Session, error) {
+	session, err := u.repo.ActiveSession(ctx, ownerID)
+	if err != nil {
+		return Session{}, err
+	}
+	exercise := session.CurrentExercise()
+	if exercise == nil || !exercise.Structured() || len(exercise.WarmupSets()) < len(exercise.Warmup) || len(exercise.WorkingSets()) > 0 {
+		return Session{}, ErrNotEditable
+	}
+	if err := u.Expect(ctx, ownerID, InputWarmup); err != nil {
+		return Session{}, err
+	}
+	return session, nil
+}
+
+func (u *UseCase) AddWarmup(ctx context.Context, ownerID int64, raw string, now time.Time) (Session, error) {
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return Session{}, err
+	}
+	if state.Mode != InputWarmup {
+		return Session{}, ErrNotEditable
+	}
+	input, err := ParseSet(raw)
+	if err != nil {
+		return Session{}, err
+	}
+	session, err := u.repo.ActiveSession(ctx, ownerID)
+	if err != nil {
+		return Session{}, err
+	}
+	exercise := session.CurrentExercise()
+	if exercise == nil || !exercise.Structured() || len(exercise.WarmupSets()) < len(exercise.Warmup) || len(exercise.WorkingSets()) > 0 {
+		return Session{}, ErrNotEditable
+	}
+	input.Type = SetTypeWarmup
+	input.CompletedAt = now
+	session, err = u.repo.AddSet(ctx, ownerID, input)
+	if err != nil {
+		return Session{}, err
+	}
+	if err := u.ClearInput(ctx, ownerID); err != nil {
+		return Session{}, err
+	}
+	return session, nil
+}
+
 func (u *UseCase) PrepareWorkingSet(ctx context.Context, ownerID int64, reps int) (Session, error) {
 	return u.prepareWorkingSet(ctx, ownerID, reps, nil, false)
 }
@@ -575,7 +622,7 @@ func (u *UseCase) prepareWorkingSet(
 		return Session{}, err
 	}
 	state.Mode = InputRIR
-	weight := exercise.Plan.WeightKG
+	weight := exercise.NextWorkingWeightKG()
 	if weightProvided {
 		weight = actualWeightKG
 	}

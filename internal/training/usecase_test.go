@@ -326,6 +326,59 @@ func TestPlannedWorkingSetCollectsNullableRIRAndFinishesExercise(t *testing.T) {
 	require.Equal(t, InputNone, repo.state.Mode)
 }
 
+func TestAdditionalWarmupIsStoredAsWarmupBeforeWorkingSets(t *testing.T) {
+	plannedWeight := 20.0
+	extraWeight := 40.0
+	repo := &stateRepository{
+		state: UIState{OwnerID: 42},
+		activeSession: Session{ID: 1, OwnerID: 42, Status: "active", CurrentPosition: 1, Exercises: []SessionExercise{{
+			ID: 2, Position: 1, Name: "Жим",
+			Warmup: []WarmupSet{{WeightKG: &plannedWeight, Reps: 10}},
+			Plan:   Recommendation{WeightKG: &extraWeight, MinReps: 8, MaxReps: 12, WorkingSets: 3},
+			Sets: []WorkoutSet{{
+				ID: 3, Position: 1, Type: SetTypeWarmup, ActualWeightKG: &plannedWeight, Reps: 10,
+			}},
+		}}},
+	}
+	usecase := NewUseCase(repo)
+
+	_, err := usecase.BeginWarmup(context.Background(), 42)
+	require.NoError(t, err)
+	require.Equal(t, InputWarmup, repo.state.Mode)
+
+	completedAt := time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)
+	session, err := usecase.AddWarmup(context.Background(), 42, "5Р 40КГ", completedAt)
+	require.NoError(t, err)
+	require.Equal(t, SetTypeWarmup, repo.lastSet.Type)
+	require.Equal(t, 5, repo.lastSet.Reps)
+	require.InDelta(t, 40, *repo.lastSet.WeightKG, 0.001)
+	require.Equal(t, completedAt, repo.lastSet.CompletedAt)
+	require.Len(t, session.CurrentExercise().WarmupSets(), 2)
+	require.Equal(t, InputNone, repo.state.Mode)
+}
+
+func TestWorkingSetUsesLatestActualWeightFromCurrentWorkout(t *testing.T) {
+	recommendedWeight := 35.0
+	actualWeight := 40.8
+	repo := &stateRepository{
+		state: UIState{OwnerID: 42},
+		activeSession: Session{ID: 1, OwnerID: 42, Status: "active", CurrentPosition: 1, Exercises: []SessionExercise{{
+			ID: 2, Position: 1, Name: "Жим",
+			Plan: Recommendation{WeightKG: &recommendedWeight, MinReps: 8, MaxReps: 12, WorkingSets: 3},
+			Sets: []WorkoutSet{{
+				ID: 3, Position: 1, Type: SetTypeWorking, ActualWeightKG: &actualWeight, Reps: 12,
+			}},
+		}}},
+	}
+
+	_, err := NewUseCase(repo).PrepareWorkingSet(context.Background(), 42, 10)
+
+	require.NoError(t, err)
+	require.Equal(t, InputRIR, repo.state.Mode)
+	require.NotNil(t, repo.state.PendingSet)
+	require.InDelta(t, 40.8, *repo.state.PendingSet.WeightKG, 0.001)
+}
+
 func TestOverrideDoesNotModifyOriginalRecommendation(t *testing.T) {
 	originalWeight := 62.5
 	repo := &stateRepository{

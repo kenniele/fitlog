@@ -86,7 +86,7 @@ func formatStructuredActiveCard(session Session, exercise SessionExercise, loc *
 	fmt.Fprintf(&out, "<b>%s</b>\n", html.EscapeString(exercise.Name))
 
 	warmups := exercise.WarmupSets()
-	if len(exercise.Warmup) > 0 {
+	if len(exercise.Warmup) > 0 || len(warmups) > 0 {
 		out.WriteString("\n<b>Разминка:</b>\n")
 		for index, planned := range exercise.Warmup {
 			switch {
@@ -104,25 +104,31 @@ func formatStructuredActiveCard(session Session, exercise SessionExercise, loc *
 				fmt.Fprintf(&out, "○ %s\n", formatWarmup(planned))
 			}
 		}
+		for index := len(exercise.Warmup); index < len(warmups); index++ {
+			fmt.Fprintf(&out, "✅ дополнительно · %s\n", FormatSetDetailed(warmups[index]))
+		}
 	}
 
 	working := exercise.WorkingSets()
+	nextWeight := exercise.NextWorkingWeightKG()
 	out.WriteString("\n<b>Рабочие:</b>\n")
 	for index := 0; index < exercise.Plan.WorkingSets; index++ {
 		switch {
 		case index < len(working):
 			fmt.Fprintf(&out, "✅ %s\n", FormatSetDetailed(working[index]))
 		case index == len(working) && len(warmups) >= len(exercise.Warmup):
-			fmt.Fprintf(&out, "➡️ %s\n", formatPlanSet(exercise.Plan.WeightKG, exercise.Plan.MinReps, exercise.Plan.MaxReps))
+			fmt.Fprintf(&out, "➡️ %s\n", formatPlanSet(nextWeight, exercise.Plan.MinReps, exercise.Plan.MaxReps))
 		default:
-			fmt.Fprintf(&out, "○ %s\n", formatPlanSet(exercise.Plan.WeightKG, exercise.Plan.MinReps, exercise.Plan.MaxReps))
+			fmt.Fprintf(&out, "○ %s\n", formatPlanSet(nextWeight, exercise.Plan.MinReps, exercise.Plan.MaxReps))
 		}
 	}
 	fmt.Fprintf(&out, "\nЦель: RIR %s · отдых между подходами: %s", formatDecimal(exercise.Plan.TargetRIR), formatSeconds(exercise.Plan.RestSeconds))
 	if exercise.Overridden {
 		out.WriteString("\n✏️ Рекомендация изменена для этой тренировки.")
 	}
-	if exercise.Recommendation.Reason != "" {
+	if len(working) > 0 && nextWeight != nil {
+		fmt.Fprintf(&out, "\n\n<b>Почему:</b>\nПовторяем последний фактический вес этой тренировки: %s кг.", formatDecimal(*nextWeight))
+	} else if exercise.Recommendation.Reason != "" {
 		fmt.Fprintf(&out, "\n\n<b>Почему:</b>\n%s", html.EscapeString(exercise.Recommendation.Reason))
 	}
 	if session.RestUntil != nil && session.RestUntil.After(time.Now()) {
@@ -198,12 +204,21 @@ func FormatFinished(session Session, loc *time.Location) string {
 		if len(exercise.Sets) == 0 {
 			out.WriteString("пропуск\n")
 		} else {
+			warmupIndex := 0
 			for _, set := range exercise.Sets {
 				prefix := ""
+				formatted := FormatSetDetailed(set)
 				if set.Type == SetTypeWarmup {
 					prefix = "разминка · "
+					if warmupIndex < len(exercise.Warmup) && exercise.Warmup[warmupIndex].Bar && set.ActualWeightKG == nil && set.WeightKG == nil {
+						formatted = fmt.Sprintf("гриф × %d", set.Reps)
+						if set.ActualReps != nil {
+							formatted = fmt.Sprintf("гриф × %d", *set.ActualReps)
+						}
+					}
+					warmupIndex++
 				}
-				out.WriteString(prefix + FormatSetDetailed(set) + "\n")
+				out.WriteString(prefix + formatted + "\n")
 			}
 		}
 		if exercise.Note != "" {
@@ -211,19 +226,9 @@ func FormatFinished(session Session, loc *time.Location) string {
 		}
 	}
 
-	sets := 0
-	warmupSets := 0
-	workingSets := 0
+	workingSets, warmupSets := session.SetCounts()
 	skipped := 0
 	for _, exercise := range session.Exercises {
-		sets += len(exercise.Sets)
-		for _, set := range exercise.Sets {
-			if set.Type == SetTypeWarmup {
-				warmupSets++
-			} else {
-				workingSets++
-			}
-		}
 		if len(exercise.Sets) == 0 {
 			skipped++
 		}
@@ -231,7 +236,7 @@ func FormatFinished(session Session, loc *time.Location) string {
 	if warmupSets > 0 || sessionHasStructuredExercises(session) {
 		fmt.Fprintf(&out, "\nУпражнений: %d · Рабочих подходов: %d · Разминочных: %d", len(session.Exercises), workingSets, warmupSets)
 	} else {
-		fmt.Fprintf(&out, "\nУпражнений: %d · Подходов: %d", len(session.Exercises), sets)
+		fmt.Fprintf(&out, "\nУпражнений: %d · Подходов: %d", len(session.Exercises), workingSets)
 	}
 	if skipped > 0 {
 		fmt.Fprintf(&out, " · Пропусков: %d", skipped)

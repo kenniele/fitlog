@@ -29,6 +29,7 @@ type InputMode string
 const (
 	InputNone                   InputMode = ""
 	InputSet                    InputMode = "set"
+	InputWarmup                 InputMode = "warmup"
 	InputNote                   InputMode = "note"
 	InputImportFile             InputMode = "import_file"
 	InputImportOK               InputMode = "import_preview"
@@ -268,6 +269,22 @@ func (e SessionExercise) WorkingSets() []WorkoutSet {
 	return sets
 }
 
+// NextWorkingWeightKG returns the weight to prefill for the next working set.
+// Once the athlete has completed a working set in the current workout, its
+// actual weight takes precedence over the recommendation snapshotted from
+// previous workouts.
+func (e SessionExercise) NextWorkingWeightKG() *float64 {
+	working := e.WorkingSets()
+	if len(working) == 0 {
+		return e.Plan.WeightKG
+	}
+	latest := working[len(working)-1]
+	if latest.ActualWeightKG != nil {
+		return latest.ActualWeightKG
+	}
+	return latest.WeightKG
+}
+
 func (e SessionExercise) PlanComplete() bool {
 	return e.Structured() && len(e.WarmupSets()) >= len(e.Warmup) && len(e.WorkingSets()) >= e.Plan.WorkingSets
 }
@@ -298,6 +315,19 @@ func (s Session) CurrentExercise() *SessionExercise {
 		}
 	}
 	return nil
+}
+
+func (s Session) SetCounts() (working, warmup int) {
+	for _, exercise := range s.Exercises {
+		for _, set := range exercise.Sets {
+			if set.Type == SetTypeWarmup {
+				warmup++
+			} else {
+				working++
+			}
+		}
+	}
+	return working, warmup
 }
 
 type UIState struct {

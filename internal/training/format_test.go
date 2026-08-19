@@ -90,6 +90,48 @@ func TestFormatActiveCardShowsOnlyCurrentStructuredAction(t *testing.T) {
 	require.Contains(t, got, "Почему:")
 }
 
+func TestStructuredCardsShowAdditionalWarmupAndLatestCurrentWeight(t *testing.T) {
+	recommendedWeight := 35.0
+	actualWeight := 40.8
+	warmupWeight := 20.0
+	actualWarmupReps := 10
+	actualWorkingReps := 12
+	session := Session{
+		ProgramName: "Фуллбади A", Status: "active", CurrentPosition: 1,
+		StartedAt: time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC),
+		Exercises: []SessionExercise{{
+			Position: 1, Name: "Жим штанги лёжа",
+			Warmup:         []WarmupSet{{Bar: true, Reps: 10}},
+			Recommendation: Recommendation{WeightKG: &recommendedWeight, MinReps: 8, MaxReps: 12, WorkingSets: 3, Reason: "Вес из истории."},
+			Plan:           Recommendation{WeightKG: &recommendedWeight, MinReps: 8, MaxReps: 12, WorkingSets: 3},
+			Sets: []WorkoutSet{
+				{Position: 1, Type: SetTypeWarmup, ActualReps: &actualWarmupReps, Reps: actualWarmupReps},
+				{Position: 2, Type: SetTypeWarmup, ActualWeightKG: &warmupWeight, ActualReps: &actualWarmupReps, Reps: actualWarmupReps},
+				{Position: 3, Type: SetTypeWorking, ActualWeightKG: &actualWeight, ActualReps: &actualWorkingReps, Reps: actualWorkingReps},
+			},
+		}},
+	}
+
+	active := FormatActiveCard(session, nil, time.UTC, "")
+	require.Contains(t, active, "✅ гриф × 10")
+	require.Contains(t, active, "✅ дополнительно · 10Р 20КГ")
+	require.Contains(t, active, "➡️ 40.8 кг × 8–12")
+	require.Contains(t, active, "Повторяем последний фактический вес этой тренировки: 40.8 кг.")
+	require.NotContains(t, active, "Вес из истории.")
+
+	finishedAt := session.StartedAt.Add(time.Hour)
+	session.Status = "finished"
+	session.FinishedAt = &finishedAt
+	finished := FormatFinished(session, time.UTC)
+	require.Contains(t, finished, "разминка · гриф × 10")
+	require.Contains(t, finished, "разминка · 10Р 20КГ")
+	require.Contains(t, finished, "Рабочих подходов: 1 · Разминочных: 2")
+
+	working, warmup := session.SetCounts()
+	require.Equal(t, 1, working)
+	require.Equal(t, 2, warmup)
+}
+
 func TestFormatSessionDuration(t *testing.T) {
 	started := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 	finished := started.Add(42*time.Minute + 20*time.Second)
