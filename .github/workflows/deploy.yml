@@ -12,6 +12,7 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/kenniele/fitlog
+  WEB_IMAGE: ghcr.io/kenniele/fitlog-web
 
 jobs:
   test:
@@ -22,8 +23,23 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: go vet ./...
-      - run: go test -race -count=1 ./...
+      - run: go vet ./cmd/... ./internal/... ./migrations/...
+      - run: go test -race -count=1 ./cmd/... ./internal/... ./migrations/...
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run typecheck
+        working-directory: web
+      - run: npm run lint
+        working-directory: web
+      - run: npm test
+        working-directory: web
+      - run: npm run build
+        working-directory: web
 
   build:
     needs: test
@@ -41,7 +57,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push image
+      - name: Build and push Go image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -53,6 +69,17 @@ jobs:
           # Кэш слоёв храним в GitHub Actions, а не на сервере — VPS-диск не растёт.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Build and push Control Center image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deployments/Dockerfile.web
+          push: true
+          tags: |
+            ${{ env.WEB_IMAGE }}:latest
+            ${{ env.WEB_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
 
   deploy:
     needs: build
@@ -79,7 +106,7 @@ jobs:
           # файлов не ломал деплой. .env в .gitignore — reset --hard его не трогает.
           git fetch origin main
           git reset --hard origin/main
-          COMPOSE="docker compose -f deployments/docker-compose.yml -f deployments/docker-compose.prod.yml"
+          COMPOSE="docker compose --env-file $PWD/.env -f deployments/docker-compose.yml -f deployments/docker-compose.prod.yml"
           $COMPOSE pull
           # The image embeds the SQL migrations. Apply them before starting the
           # new application version so code never runs against an old schema.
@@ -87,12 +114,8 @@ jobs:
           # Do not let the one-off container consume the remaining SSH heredoc.
           # Without closed stdin, bash reaches EOF here and never recreates app.
           $COMPOSE run --rm --no-deps -T app migrate </dev/null
-          docker compose \
-            --env-file /home/fitlog/fitlog/.env \
-            -f deployments/docker-compose.yml \
-            -f deployments/docker-compose.prod.yml \
-            up -d --force-recreate app
-          $COMPOSE logs --tail=20 app
+          $COMPOSE up -d --force-recreate app web caddy
+          $COMPOSE logs --tail=20 app web caddy
           # Старый образ после обновления тега становится dangling — убираем.
           docker image prune -f || true
           REMOTE

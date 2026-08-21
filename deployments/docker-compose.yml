@@ -48,5 +48,22 @@ services:
     expose:
       - "8080"
 
+  web:
+    image: ghcr.io/kenniele/fitlog-web:latest
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile.web
+    container_name: fitlog-web
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      NEXT_TELEMETRY_DISABLED: "1"
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      FITLOG_API_INTERNAL_URL: http://app:8080
+    expose:
+      - "3000"
+
 volumes:
   fitlog_pgdata:

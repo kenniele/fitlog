@@ -10,7 +10,16 @@
 
 fitlog.chickenkiller.com {
     encode zstd gzip
-    reverse_proxy app:8080
+
+    @backend path /api/* /healthz /oauth/* /callback /articles /articles/*
+    handle @backend {
+        reverse_proxy app:8080
+    }
+
+    handle {
+        reverse_proxy web:3000
+    }
+
     log {
         output stdout
         format console

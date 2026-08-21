@@ -217,6 +217,8 @@ func FormatFinished(session Session, loc *time.Location) string {
 						}
 					}
 					warmupIndex++
+				} else if set.Type == SetTypeDrop {
+					prefix = "drop · "
 				}
 				out.WriteString(prefix + formatted + "\n")
 			}
@@ -227,14 +229,18 @@ func FormatFinished(session Session, loc *time.Location) string {
 	}
 
 	workingSets, warmupSets := session.SetCounts()
+	dropSets := session.DropSetCount()
 	skipped := 0
 	for _, exercise := range session.Exercises {
 		if len(exercise.Sets) == 0 {
 			skipped++
 		}
 	}
-	if warmupSets > 0 || sessionHasStructuredExercises(session) {
+	if warmupSets > 0 || dropSets > 0 || sessionHasStructuredExercises(session) {
 		fmt.Fprintf(&out, "\nУпражнений: %d · Рабочих подходов: %d · Разминочных: %d", len(session.Exercises), workingSets, warmupSets)
+		if dropSets > 0 {
+			fmt.Fprintf(&out, " · Drop: %d", dropSets)
+		}
 	} else {
 		fmt.Fprintf(&out, "\nУпражнений: %d · Подходов: %d", len(session.Exercises), workingSets)
 	}

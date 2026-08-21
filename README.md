@@ -7,6 +7,8 @@ Personal Telegram assistant that pulls fitness data from **Whoop**, nutrition da
 - Go 1.25.7+
 - PostgreSQL 16 (`pgx/v5`, `goose` for migrations)
 - `chi/v5` for the Whoop OAuth callback, healthcheck, and article pages
+- Next.js App Router, TypeScript, Tailwind, TanStack Query/Table, Recharts,
+  React Hook Form and Zod for the optional Control Center
 - `telebot.v3` (long-polling)
 - `golang.org/x/oauth2` for Whoop; handwritten HMAC-SHA1 signing for FatSecret
 - `slog`, `caarlos0/env/v11`, `joho/godotenv`
@@ -18,10 +20,68 @@ cp .env.example .env
 # Fill in WHOOP_*, FATSECRET_*, TELEGRAM_*, FITLOG_TOKEN_ENCRYPTION_KEY (32 random bytes, base64)
 make docker-up
 make migrate-up
-make run    # or: docker compose logs -f app
+make run
 ```
 
 In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀** or **Питание 🥑**; when the provider is not connected yet, the bot responds with an OAuth authorization button. Both providers' delegated tokens are encrypted in PostgreSQL.
+
+## FitLog Control Center
+
+The optional Control Center is a single-user web workspace at `/dashboard` for
+training, recovery, sleep, nutrition, body measurements, correlations, plans,
+and file imports. It reuses the Telegram workout tables instead of maintaining
+a second training history. Recovery, sleep, nutrition, and body records are
+persisted separately and can be entered manually or imported from CSV/JSON.
+Body records support the main values from a gym InBody sheet: body water,
+muscle/fat composition, visceral fat, BMR, score, phase angle, and five
+segmental lean/fat measurements. The Body page compares each saved scan with
+the previous one and keeps missing values as missing rather than zero.
+
+Set a long random `FITLOG_DASHBOARD_TOKEN` to enable the API. The owner defaults
+to the first `TELEGRAM_ALLOWED_USER_IDS` entry; set
+`FITLOG_DASHBOARD_OWNER_ID` only when a multi-entry allowlist needs another
+owner. Leaving the token empty keeps existing bot-only deployments working and
+returns `dashboard_disabled` from the protected API.
+
+For local development:
+
+```bash
+make migrate-up
+npm --prefix web ci
+make run
+# In a second terminal:
+npm --prefix web run dev
+```
+
+Open `http://localhost:3000/dashboard`. The Next development server proxies
+`/api/*` to `http://localhost:8080`; override that internal destination with
+`FITLOG_API_INTERNAL_URL` when needed. Demo data is never loaded implicitly:
+
+```bash
+make demo-seed
+```
+
+An operator-only FatSecret history backfill is also available. It reads the
+already encrypted delegated OAuth token, fetches monthly daily totals, and
+defaults to the latest 100 completed local days:
+
+```bash
+go run ./cmd/fitlog fatsecret-backfill --days 100 --dry-run
+# Persistent API content requires separate FatSecret storage authorization:
+go run ./cmd/fitlog fatsecret-backfill --days 100 --storage-authorized
+```
+
+Standard FatSecret API terms only permit most diary nutrients to be cached for
+24 hours. Do not use the persistent mode without a separate storage entitlement;
+import the user's own FatSecret CSV export through Data Imports instead.
+
+The dashboard uses an HttpOnly signed session cookie. Mutating API calls also
+require `X-Fitlog-Request: 1`; the web client adds it automatically. WHOOP and
+FatSecret OAuth connections are not presented as continuous background sync.
+
+See [Control Center operations and analytics](docs/control-center.md) for date
+semantics, formulas, import mapping, security, production topology, and known
+limitations.
 
 ## Configuration
 
@@ -38,6 +98,8 @@ In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀*
 | `TELEGRAM_ALLOWED_USER_IDS`    | yes      | Comma-separated int64 Telegram user IDs                              |
 | `TELEGRAM_WORKOUT_CHANNEL_IDS` | no       | Comma-separated publish-channel IDs; bot needs permission to post    |
 | `TELEGRAM_WORKOUT_CHANNEL_ID`  | no       | Legacy single channel ID; combined with the plural setting           |
+| `FITLOG_DASHBOARD_TOKEN`       | no       | Long random secret; enables authenticated Control Center API         |
+| `FITLOG_DASHBOARD_OWNER_ID`    | no       | Owner override; defaults to first allowed Telegram user              |
 | `HTTP_ADDR`                    | no       | Default `:8080`. Serves OAuth callbacks + DB-aware `/healthz`.       |
 | `TZ_LOCATION`                  | no       | Default `Europe/Moscow`. Used for "today"/"yesterday" boundaries.    |
 | `LOG_LEVEL`                    | no       | `debug` / `info` / `warn` / `error`. Default `info`.                 |
@@ -174,8 +236,11 @@ internal/storage/       pgx pool + repositories
 internal/reportfmt/     shared MarkdownV2 presentation helpers
 internal/bot/           thin Telegram delivery adapter and three-button menu
 internal/server/        HTTP router for OAuth, healthcheck, and articles
+internal/controlcenter/ Control Center API, analytics, imports, and demo seed
 internal/config/        env loading
 internal/observability/ slog setup
 migrations/             goose SQL migrations
 deployments/            Dockerfile + docker-compose.yml
+web/                    Next.js Control Center
+docs/                   Operator and developer documentation
 ```

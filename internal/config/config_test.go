@@ -32,3 +32,24 @@ func TestWorkoutChannelsSupportsLegacyAndList(t *testing.T) {
 	}
 	require.Equal(t, []int64{-1001, -1002, -1003}, cfg.WorkoutChannels())
 }
+
+func TestDashboardOwner(t *testing.T) {
+	t.Run("explicit owner", func(t *testing.T) {
+		cfg := Config{DashboardOwnerID: 77, TelegramAllowedUserIDs: []int64{42}}
+		ownerID, err := cfg.DashboardOwner()
+		require.NoError(t, err)
+		require.Equal(t, int64(77), ownerID)
+	})
+
+	t.Run("first allowlisted owner", func(t *testing.T) {
+		cfg := Config{TelegramAllowedUserIDs: []int64{42, 77}}
+		ownerID, err := cfg.DashboardOwner()
+		require.NoError(t, err)
+		require.Equal(t, int64(42), ownerID)
+	})
+
+	t.Run("missing owner", func(t *testing.T) {
+		_, err := (&Config{}).DashboardOwner()
+		require.Error(t, err)
+	})
+}

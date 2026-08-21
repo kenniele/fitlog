@@ -9,6 +9,7 @@ services:
     restart: unless-stopped
     depends_on:
       - app
+      - web
     ports:
       - "80:80"
       - "443:443"

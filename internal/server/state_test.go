@@ -40,6 +40,19 @@ func TestRouterMountsArticles(t *testing.T) {
 	require.Equal(t, "/article-id", gotPath)
 }
 
+func TestRouterMountsControlCenterAPI(t *testing.T) {
+	var gotPath string
+	api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/dashboard/overview", nil)
+	RouterWithAPI(nil, nil, healthChecker{}, nil, api).ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "/dashboard/overview", gotPath)
+}
+
 func TestStateStore_IssueConsume(t *testing.T) {
 	s := NewStateStore()
 	st, err := s.Issue(42)

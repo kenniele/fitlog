@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1.7
+
+FROM node:22-alpine AS dependencies
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+
+FROM node:22-alpine AS build
+WORKDIR /app
+ARG FITLOG_API_INTERNAL_URL=http://app:8080
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    FITLOG_API_INTERNAL_URL=${FITLOG_API_INTERNAL_URL}
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY web/ ./
+RUN npm run build
+
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    HOSTNAME=0.0.0.0 \
+    PORT=3000
+RUN addgroup -S -g 10001 fitlog && adduser -S -u 10001 -G fitlog fitlog
+COPY --from=build --chown=fitlog:fitlog /app/.next/standalone ./
+COPY --from=build --chown=fitlog:fitlog /app/.next/static ./.next/static
+COPY --from=build --chown=fitlog:fitlog /app/public ./public
+USER fitlog
+EXPOSE 3000
+CMD ["node", "server.js"]

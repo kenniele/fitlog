@@ -31,12 +31,32 @@ type Config struct {
 	TelegramWorkoutChannelID  int64   `env:"TELEGRAM_WORKOUT_CHANNEL_ID"`
 	TelegramWorkoutChannelIDs []int64 `env:"TELEGRAM_WORKOUT_CHANNEL_IDS" envSeparator:","`
 
+	// The Control Center is an optional single-user HTTP workspace. Keeping the
+	// token optional means existing bot-only installations continue to start;
+	// the dashboard API stays disabled until an operator opts in explicitly.
+	DashboardToken   string `env:"FITLOG_DASHBOARD_TOKEN"`
+	DashboardOwnerID int64  `env:"FITLOG_DASHBOARD_OWNER_ID"`
+
 	LogLevel   string `env:"LOG_LEVEL" envDefault:"info"`
 	HTTPAddr   string `env:"HTTP_ADDR" envDefault:":8080"`
 	TZLocation string `env:"TZ_LOCATION" envDefault:"Europe/Moscow"`
 
 	ObsidianArticlesPath string `env:"OBSIDIAN_ARTICLES_PATH"`
 	PublicBaseURL        string `env:"PUBLIC_BASE_URL"`
+}
+
+// DashboardOwner returns the Telegram owner whose existing training history
+// is exposed in the single-user Control Center. An explicit value is useful
+// when the Telegram allowlist contains more than one maintenance account; the
+// first allowlisted user is the safe backwards-compatible default.
+func (c *Config) DashboardOwner() (int64, error) {
+	if c.DashboardOwnerID > 0 {
+		return c.DashboardOwnerID, nil
+	}
+	if len(c.TelegramAllowedUserIDs) == 0 || c.TelegramAllowedUserIDs[0] <= 0 {
+		return 0, fmt.Errorf("dashboard owner is not configured")
+	}
+	return c.TelegramAllowedUserIDs[0], nil
 }
 
 // BaseURL returns the public origin used in links sent to Telegram. When an

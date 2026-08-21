@@ -51,6 +51,9 @@ type SetType string
 const (
 	SetTypeWarmup  SetType = "warmup"
 	SetTypeWorking SetType = "working"
+	// SetTypeDrop is created by the Control Center. It is intentionally not a
+	// planned working set and never participates in progression decisions.
+	SetTypeDrop SetType = "drop"
 )
 
 type ProgressionAction = progression.Action
@@ -320,14 +323,29 @@ func (s Session) CurrentExercise() *SessionExercise {
 func (s Session) SetCounts() (working, warmup int) {
 	for _, exercise := range s.Exercises {
 		for _, set := range exercise.Sets {
-			if set.Type == SetTypeWarmup {
+			switch set.Type {
+			case SetTypeWarmup:
 				warmup++
-			} else {
+			case "", SetTypeWorking:
 				working++
 			}
 		}
 	}
 	return working, warmup
+}
+
+// DropSetCount keeps drop sets visible without letting them inflate the bot's
+// working-set/progression counters.
+func (s Session) DropSetCount() int {
+	count := 0
+	for _, exercise := range s.Exercises {
+		for _, set := range exercise.Sets {
+			if set.Type == SetTypeDrop {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 type UIState struct {

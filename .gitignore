@@ -10,6 +10,9 @@ deployments/Caddyfile
 /fitlog
 /bin/
 /dist/
+/web/node_modules/
+/web/.next/
+/web/coverage/
 
 # Test/coverage
 *.test

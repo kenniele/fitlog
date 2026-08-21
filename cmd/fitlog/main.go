@@ -16,6 +16,7 @@ import (
 	"fitlog/internal/auth"
 	"fitlog/internal/bot"
 	"fitlog/internal/config"
+	"fitlog/internal/controlcenter"
 	"fitlog/internal/fatsecret"
 	"fitlog/internal/observability"
 	"fitlog/internal/obsidian"
@@ -31,7 +32,7 @@ func main() {
 		Use:   "fitlog",
 		Short: "Personal Telegram assistant for health, nutrition, and reading",
 	}
-	root.AddCommand(serverCmd(), migrateCmd())
+	root.AddCommand(serverCmd(), migrateCmd(), demoSeedCmd(), fatSecretBackfillCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -51,6 +52,45 @@ func migrateCmd() *cobra.Command {
 			if err := migrations.Up(cmd.Context(), databaseURL); err != nil {
 				return fmt.Errorf("migrate: %w", err)
 			}
+			return nil
+		},
+	}
+}
+
+func demoSeedCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "demo-seed",
+		Short: "Insert missing deterministic Control Center demo data",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+			ownerID, err := cfg.DashboardOwner()
+			if err != nil {
+				return err
+			}
+			loc, err := cfg.Location()
+			if err != nil {
+				return err
+			}
+			pool, err := storage.NewPool(cmd.Context(), cfg.DatabaseURL)
+			if err != nil {
+				return fmt.Errorf("db: %w", err)
+			}
+			defer pool.Close()
+
+			result, err := controlcenter.SeedDemo(
+				cmd.Context(), controlcenter.NewRepository(pool), ownerID, time.Now(), loc,
+			)
+			if err != nil {
+				return fmt.Errorf("seed demo: %w", err)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(),
+				"processed %d demo days; inserted %d workouts, %d recovery, %d sleep, %d nutrition, %d body measurements\n",
+				result.Days, result.WorkoutSessions, result.RecoveryEntries, result.SleepEntries,
+				result.NutritionEntries, result.BodyMeasurements,
+			)
 			return nil
 		},
 	}
@@ -76,6 +116,10 @@ func run(parent context.Context) error {
 	slog.SetDefault(logger)
 
 	loc, err := cfg.Location()
+	if err != nil {
+		return err
+	}
+	ownerID, err := cfg.DashboardOwner()
 	if err != nil {
 		return err
 	}
@@ -147,9 +191,12 @@ func run(parent context.Context) error {
 	// HTTP server (OAuth callback + healthz). Bot doubles as Notifier.
 	cb := server.NewCallbackHandler(oauthCfg, states, tokenStore, tb, logger)
 	articleHandler := obsidian.NewHandler(articleReports, logger)
+	controlCenterAPI := controlcenter.NewHandler(
+		controlcenter.NewRepository(pool), ownerID, cfg.DashboardToken, loc,
+	)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           server.Router(cb, fsOAuth, pool, articleHandler),
+		Handler:           server.RouterWithAPI(cb, fsOAuth, pool, articleHandler, controlCenterAPI),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

@@ -105,8 +105,15 @@ func NewCallbackHandler(cfg *oauth2.Config, states *StateStore, tokens *auth.Tok
 	return &CallbackHandler{cfg: cfg, states: states, tokens: tokens, notifier: notifier, logger: logger}
 }
 
-// Router builds an http.Handler exposing health, OAuth, and public article pages.
+// Router builds the bot-only HTTP surface retained for existing installations
+// and focused tests. Control Center deployments use RouterWithAPI below.
 func Router(h *CallbackHandler, fatSecret *FatSecretOAuth, database HealthChecker, articles http.Handler) http.Handler {
+	return RouterWithAPI(h, fatSecret, database, articles, nil)
+}
+
+// RouterWithAPI builds the complete HTTP surface. api is mounted below
+// /api/v1 so its handlers can stay unaware of deployment-specific prefixes.
+func RouterWithAPI(h *CallbackHandler, fatSecret *FatSecretOAuth, database HealthChecker, articles, api http.Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/healthz", func(w http.ResponseWriter, request *http.Request) {
 		ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
@@ -129,6 +136,9 @@ func Router(h *CallbackHandler, fatSecret *FatSecretOAuth, database HealthChecke
 	}
 	if articles != nil {
 		r.Mount("/articles", http.StripPrefix("/articles", articles))
+	}
+	if api != nil {
+		r.Mount("/api/v1", http.StripPrefix("/api/v1", api))
 	}
 	return r
 }

@@ -132,6 +132,25 @@ func TestStructuredCardsShowAdditionalWarmupAndLatestCurrentWeight(t *testing.T)
 	require.Equal(t, 2, warmup)
 }
 
+func TestFormatFinishedMarksDropSetsWithoutCountingThemAsWorking(t *testing.T) {
+	weight := 30.0
+	reps := 12
+	finishedAt := time.Date(2026, 8, 21, 9, 30, 0, 0, time.UTC)
+	session := Session{
+		ProgramName: "Фуллбади A", Status: "finished",
+		StartedAt: finishedAt.Add(-time.Hour), FinishedAt: &finishedAt,
+		Exercises: []SessionExercise{{Name: "Разгибания рук", Sets: []WorkoutSet{
+			{Type: SetTypeWorking, ActualWeightKG: &weight, ActualReps: &reps, Reps: reps},
+			{Type: SetTypeDrop, ActualWeightKG: &weight, ActualReps: &reps, Reps: reps},
+		}}},
+	}
+
+	got := FormatFinished(session, time.UTC)
+	require.Contains(t, got, "drop · 12Р 30КГ")
+	require.Contains(t, got, "Рабочих подходов: 1")
+	require.Contains(t, got, "Drop: 1")
+}
+
 func TestFormatSessionDuration(t *testing.T) {
 	started := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 	finished := started.Add(42*time.Minute + 20*time.Second)
