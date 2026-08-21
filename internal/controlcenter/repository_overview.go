@@ -105,14 +105,14 @@ func (r *PostgresRepository) Overview(ctx context.Context, ownerID int64, dateRa
 	if settings.SleepTargetMinSeconds != nil && overview.Today.SleepSeconds != nil && *overview.Today.SleepSeconds < int64(*settings.SleepTargetMinSeconds) {
 		overview.Highlights = append(overview.Highlights, Highlight{
 			ID: "sleep-below-target", Type: "warning", Title: "Сон короче цели", Date: todayKey,
-			Description: fmt.Sprintf("Сегодня %d мин при минимальной цели %d мин", *overview.Today.SleepSeconds/60, *settings.SleepTargetMinSeconds/60),
+			Description: fmt.Sprintf("Сегодня %s при минимальной цели %s", formatDurationRU(*overview.Today.SleepSeconds), formatDurationRU(int64(*settings.SleepTargetMinSeconds))),
 			Rule:        "фактический сон ниже сохранённой минимальной цели",
 		})
 	}
 	if settings.SleepTargetMaxSeconds != nil && overview.Today.SleepSeconds != nil && *overview.Today.SleepSeconds > int64(*settings.SleepTargetMaxSeconds) {
 		overview.Highlights = append(overview.Highlights, Highlight{
 			ID: "sleep-above-target", Type: "neutral", Title: "Сон длиннее целевого диапазона", Date: todayKey,
-			Description: fmt.Sprintf("Сегодня %d мин при максимальной цели %d мин", *overview.Today.SleepSeconds/60, *settings.SleepTargetMaxSeconds/60),
+			Description: fmt.Sprintf("Сегодня %s при максимальной цели %s", formatDurationRU(*overview.Today.SleepSeconds), formatDurationRU(int64(*settings.SleepTargetMaxSeconds))),
 			Rule:        "фактический сон выше сохранённой максимальной границы; это описательное наблюдение, не медицинский вывод",
 		})
 	}
@@ -163,6 +163,16 @@ func (r *PostgresRepository) Overview(ctx context.Context, ownerID int64, dateRa
 		overview.Comparison = &Comparison{Range: rangeView(previous, loc), Summary: previousSummary}
 	}
 	return overview, nil
+}
+
+func formatDurationRU(seconds int64) string {
+	totalMinutes := int64(math.Round(float64(seconds) / 60))
+	hours := totalMinutes / 60
+	minutes := totalMinutes % 60
+	if hours == 0 {
+		return fmt.Sprintf("%d мин", minutes)
+	}
+	return fmt.Sprintf("%d ч %d мин", hours, minutes)
 }
 
 func startOfWeek(day time.Time, firstDay int) time.Time {

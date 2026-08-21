@@ -13,6 +13,7 @@ export type Metric = {
   value?: string | number | null;
   unit?: string | null;
   delta?: NullableNumber;
+  format?: "duration";
   context?: string | null;
   status?: "good" | "warning" | "critical" | "neutral" | null;
   series?: SeriesPoint[] | null;

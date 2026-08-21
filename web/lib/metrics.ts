@@ -23,15 +23,19 @@ function unitFor(key: string) {
   return undefined;
 }
 
+function formatFor(key: string): Metric["format"] {
+  return key.split(".").at(-1)?.endsWith("_seconds") ? "duration" : undefined;
+}
+
 function collect(summary: unknown, prefix = "", result: Record<string, Metric> = {}) {
   if (!isRecord(summary)) return result;
   Object.entries(summary).forEach(([key, value]) => {
     const path = prefix ? `${prefix}.${key}` : key;
     if (isMetricSummary(value)) {
-      result[path] = { label: humanize(path), value: value.current ?? value.average ?? null, unit: unitFor(path), delta: value.change, context: value.samples == null ? null : `${formatNumber(value.samples)} наблюдений` };
+      result[path] = { label: humanize(path), value: value.current ?? value.average ?? null, unit: unitFor(path), delta: value.change, format: formatFor(path), context: value.samples == null ? null : `${formatNumber(value.samples)} наблюдений` };
       if (!result[key]) result[key] = result[path];
     } else if (typeof value === "number" || value === null) {
-      result[path] = { label: humanize(path), value, unit: unitFor(path) };
+      result[path] = { label: humanize(path), value, unit: unitFor(path), format: formatFor(path) };
       if (!result[key]) result[key] = result[path];
     } else if (isRecord(value)) collect(value, path, result);
   });
@@ -96,6 +100,7 @@ export function dailyPointMetrics(
       value: definition.duration && typeof value === "number" ? formatDuration(value) : value,
       unit: definition.duration ? undefined : definition.unit ?? summaryMetric?.unit ?? unitFor(definition.key),
       delta,
+      format: definition.duration ? "duration" : summaryMetric?.format,
       series: daily?.map((point) => ({ date: point.date, value: typeof point[definition.key] === "number" ? point[definition.key] as number : null })),
       context: value == null ? "Данных за сегодня нет" : delta == null ? (summaryMetric?.context ?? "Сегодня") : "Относительно предыдущего дня",
     };

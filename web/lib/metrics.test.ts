@@ -26,4 +26,20 @@ describe("dailyPointMetrics", () => {
       { date: "2026-08-21", value: 81 },
     ]);
   });
+
+  it("marks duration values and deltas for human-readable rendering", () => {
+    const metrics = dailyPointMetrics(
+      { sleep_seconds: 24_480 },
+      {},
+      [{ key: "sleep_seconds", label: "Сон", duration: true }],
+      null,
+      { sleep_seconds: 22_988 },
+    );
+
+    expect(metrics.sleep_seconds).toMatchObject({
+      value: "6 ч 48 мин",
+      delta: 1_492,
+      format: "duration",
+    });
+  });
 });
