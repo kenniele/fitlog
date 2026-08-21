@@ -5,6 +5,7 @@ package domain
 type Recovery struct {
 	CycleID         int64
 	SleepID         string // UUID
+	ScoreState      string
 	Score           float64
 	HRVMilli        float64
 	RestingHR       float64

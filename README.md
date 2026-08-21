@@ -75,6 +75,20 @@ Standard FatSecret API terms only permit most diary nutrients to be cached for
 24 hours. Do not use the persistent mode without a separate storage entitlement;
 import the user's own FatSecret CSV export through Data Imports instead.
 
+WHOOP recovery and sleep can be backfilled independently from the already
+encrypted OAuth token. The range includes the current local calendar day,
+fetches paginated Cycle/Recovery/Sleep collections, and atomically upserts the
+joined health rows without replacing manual/file imports:
+
+```bash
+go run ./cmd/fitlog whoop-backfill --days 250 --dry-run
+go run ./cmd/fitlog whoop-backfill --days 250
+```
+
+This is an operator-triggered reconciliation, not a background scheduler.
+WHOOP workouts are deliberately not converted into strength-training sessions,
+because they do not contain FitLog's exercise/set prescription and actuals.
+
 The dashboard uses an HttpOnly signed session cookie. Mutating API calls also
 require `X-Fitlog-Request: 1`; the web client adds it automatically. WHOOP and
 FatSecret OAuth connections are not presented as continuous background sync.

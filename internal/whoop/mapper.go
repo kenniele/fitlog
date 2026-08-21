@@ -23,6 +23,7 @@ func (r *recoveryDTO) toDomain() domain.Recovery {
 	out := domain.Recovery{
 		CycleID:         r.CycleID,
 		SleepID:         r.SleepID,
+		ScoreState:      r.ScoreState,
 		UserCalibrating: r.UserCalibrating,
 	}
 	if r.Score != nil {
@@ -42,6 +43,7 @@ func (s *sleepDTO) toDomain() domain.Sleep {
 		Start:      s.Start,
 		End:        s.End,
 		IsNap:      s.Nap,
+		ScoreState: s.ScoreState,
 	}
 	if s.Score != nil {
 		out.SleepPerformancePct = s.Score.SleepPerformancePercentage

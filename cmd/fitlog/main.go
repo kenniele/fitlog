@@ -32,7 +32,7 @@ func main() {
 		Use:   "fitlog",
 		Short: "Personal Telegram assistant for health, nutrition, and reading",
 	}
-	root.AddCommand(serverCmd(), migrateCmd(), demoSeedCmd(), fatSecretBackfillCmd())
+	root.AddCommand(serverCmd(), migrateCmd(), demoSeedCmd(), fatSecretBackfillCmd(), whoopBackfillCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

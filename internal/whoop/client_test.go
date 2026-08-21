@@ -103,9 +103,9 @@ func TestClient_Pagination_HardCap(t *testing.T) {
 
 	c := NewClient(srv.Client(), Options{BaseURL: srv.URL})
 	out, err := c.Cycles(context.Background(), domain.TimeRange{}, 0)
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "pagination exceeded")
 	require.Equal(t, int32(maxPages), atomic.LoadInt32(&calls), "must stop at maxPages")
-	require.Len(t, out, maxPages)
+	require.Nil(t, out, "a truncated provider result must never look successful")
 }
 
 func TestClient_Workouts_Errors(t *testing.T) {
@@ -124,7 +124,7 @@ func TestClient_Workouts_Errors(t *testing.T) {
 func TestClient_Recoveries(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/v2/recovery", r.URL.Path)
-		_, _ = w.Write([]byte(`{"records":[{"cycle_id":12345,"sleep_id":"s","score":{"recovery_score":72,"hrv_rmssd_milli":73,"resting_heart_rate":53}}]}`))
+		_, _ = w.Write([]byte(`{"records":[{"cycle_id":12345,"sleep_id":"s","score_state":"SCORED","score":{"recovery_score":72,"hrv_rmssd_milli":73,"resting_heart_rate":53}}]}`))
 	}))
 	defer srv.Close()
 
@@ -133,4 +133,5 @@ func TestClient_Recoveries(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 	require.Equal(t, 72.0, out[0].Score)
+	require.Equal(t, "SCORED", out[0].ScoreState)
 }

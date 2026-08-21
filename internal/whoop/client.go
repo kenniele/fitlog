@@ -20,10 +20,10 @@ import (
 // nanos and is also accepted, but the millis form is what the docs show.
 const whoopTimeFormat = "2006-01-02T15:04:05.000Z"
 
-// maxPages caps the number of pagination round trips. Whoop returns up to
-// 25 records per page; 10 pages = 250 records, more than any "last 30 days"
-// query should produce.
-const maxPages = 10
+// maxPages caps the number of pagination round trips. WHOOP returns up to 25
+// records per page. A 366-day backfill (plus naps) needs more than ten pages;
+// 100 still guards against a broken or looping pagination token.
+const maxPages = 100
 
 // Client speaks the Whoop v2 REST API.
 type Client struct {
@@ -136,7 +136,7 @@ func fetchPaged[T any](ctx context.Context, c *Client, path string, q url.Values
 		}
 		nextToken = env.NextToken
 	}
-	return all, nil
+	return nil, fmt.Errorf("whoop %s pagination exceeded %d pages", path, maxPages)
 }
 
 func truncate(s string, n int) string {

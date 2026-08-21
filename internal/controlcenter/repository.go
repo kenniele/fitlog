@@ -260,9 +260,14 @@ func (r *PostgresRepository) SaveSettings(ctx context.Context, ownerID int64, se
 func (r *PostgresRepository) Sources(ctx context.Context, ownerID int64) ([]SourceStatus, error) {
 	rows, err := r.pool.Query(ctx, `
 		WITH known(source, label) AS (VALUES ('whoop','WHOOP'), ('fatsecret','FatSecret')),
-		manual_sync AS (
-			SELECT max(updated_at) AS synced_at FROM nutrition_days
-			WHERE owner_id=$1 AND source='fatsecret' AND external_id LIKE 'sync:day:%'
+		provider_sync AS (
+			SELECT source, max(updated_at) AS synced_at FROM (
+				SELECT source, external_id, updated_at FROM recovery_entries WHERE owner_id=$1
+				UNION ALL SELECT source, external_id, updated_at FROM sleep_entries WHERE owner_id=$1
+				UNION ALL SELECT source, external_id, updated_at FROM nutrition_days WHERE owner_id=$1
+			) synced
+			WHERE source IN ('whoop','fatsecret') AND external_id LIKE 'sync:%'
+			GROUP BY source
 		),
 		last_updates AS (
 			SELECT source, max(updated_at) AS last_synced_at FROM (
@@ -280,10 +285,10 @@ func (r *PostgresRepository) Sources(ctx context.Context, ownerID int64) ([]Sour
 			) records GROUP BY source
 		)
 		SELECT known.source, known.label, last_updates.last_synced_at,
-			(known.source='fatsecret' AND manual_sync.synced_at IS NOT NULL) AS has_manual_sync
+			(provider_sync.synced_at IS NOT NULL) AS has_manual_sync
 		FROM known
 		LEFT JOIN last_updates ON last_updates.source = known.source
-		CROSS JOIN manual_sync
+		LEFT JOIN provider_sync ON provider_sync.source = known.source
 		ORDER BY known.source`, ownerID)
 	if err != nil {
 		return nil, fmt.Errorf("list sources: %w", err)
@@ -299,7 +304,7 @@ func (r *PostgresRepository) Sources(ctx context.Context, ownerID int64) ([]Sour
 		status.Connected = false
 		if hasManualSync {
 			status.Status = "manual_sync"
-			status.Detail = "One-shot licensed backfill; no background synchronization"
+			status.Detail = "One-shot API backfill; no background synchronization"
 		} else {
 			status.Status = "file_import_only"
 			status.Detail = "File import only; bot OAuth does not sync dashboard"

@@ -21,16 +21,17 @@ type SleepNeed struct {
 
 // Sleep is a single sleep activity from Whoop (`/v2/activity/sleep`).
 type Sleep struct {
-	ExternalID            string // UUID
-	Start                 time.Time
-	End                   time.Time
-	IsNap                 bool
-	SleepPerformancePct   float64
-	SleepEfficiencyPct    float64
-	SleepConsistencyPct   float64
-	RespiratoryRate       float64
-	Stages                SleepStages
-	DisturbanceCount      int
-	SleepCycleCount       int
-	SleepNeed             SleepNeed
+	ExternalID          string // UUID
+	Start               time.Time
+	End                 time.Time
+	IsNap               bool
+	ScoreState          string
+	SleepPerformancePct float64
+	SleepEfficiencyPct  float64
+	SleepConsistencyPct float64
+	RespiratoryRate     float64
+	Stages              SleepStages
+	DisturbanceCount    int
+	SleepCycleCount     int
+	SleepNeed           SleepNeed
 }
