@@ -87,7 +87,7 @@ func TestPostgresRepository_UpsertFatSecretNutritionDays(t *testing.T) {
 		t.Fatalf("list sources after sync: %v", err)
 	}
 	for _, status := range statuses {
-		if status.Source == "fatsecret" && (status.Connected || status.Status != "manual_sync") {
+		if status.Source == "fatsecret" && (status.Connected || status.Status != "provider_sync") {
 			t.Fatalf("FatSecret sync status = %+v", status)
 		}
 	}

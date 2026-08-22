@@ -20,6 +20,7 @@ import (
 	"fitlog/internal/fatsecret"
 	"fitlog/internal/observability"
 	"fitlog/internal/obsidian"
+	"fitlog/internal/providersync"
 	"fitlog/internal/server"
 	"fitlog/internal/storage"
 	"fitlog/internal/training"
@@ -137,6 +138,7 @@ func run(parent context.Context) error {
 		return fmt.Errorf("db: %w", err)
 	}
 	defer pool.Close()
+	controlCenterRepo := controlcenter.NewRepository(pool)
 
 	// Crypto + token store
 	cipher, err := auth.NewCipherFromBase64(cfg.TokenEncryptionKey)
@@ -167,8 +169,17 @@ func run(parent context.Context) error {
 	// Bot
 	allowlist := bot.NewAllowlist(cfg.TelegramAllowedUserIDs, logger)
 	whoopProvider := whoop.NewOAuthProvider(tokenStore, oauthCfg, logger)
-	whoopReports := whoop.NewUseCase(whoopProvider, loc)
+	whoopGate := providersync.NewGate()
+	whoopReports := providersync.SerializeWhoopReports(whoopGate, whoop.NewUseCase(whoopProvider, loc))
 	trainingReports := training.NewUseCase(storage.NewTrainingRepo(pool))
+	providerSync, err := providersync.NewWorker(providersync.Config{
+		OwnerID: ownerID, Location: loc,
+		Interval: cfg.ProviderSyncInterval, LookbackDays: cfg.ProviderSyncLookbackDays,
+		FatSecretAuthorized: cfg.FatSecretStorageAuthorized,
+	}, whoopProvider, fsProvider, controlCenterRepo, whoopGate, logger)
+	if err != nil {
+		return fmt.Errorf("provider sync: %w", err)
+	}
 	deps := bot.Deps{
 		Whoop:             whoopReports,
 		FatSecret:         fsReports,
@@ -192,7 +203,7 @@ func run(parent context.Context) error {
 	cb := server.NewCallbackHandler(oauthCfg, states, tokenStore, tb, logger)
 	articleHandler := obsidian.NewHandler(articleReports, logger)
 	controlCenterAPI := controlcenter.NewHandler(
-		controlcenter.NewRepository(pool), ownerID, cfg.DashboardToken, loc,
+		controlCenterRepo, ownerID, cfg.DashboardToken, loc,
 	)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -208,6 +219,14 @@ func run(parent context.Context) error {
 			httpErr <- err
 		}
 		close(httpErr)
+	}()
+
+	// Run provider synchronization independently from Telegram polling. The
+	// shared WHOOP gate above protects rotating refresh tokens.
+	providerSyncDone := make(chan struct{})
+	go func() {
+		defer close(providerSyncDone)
+		providerSync.Run(ctx)
 	}()
 
 	// Start bot (blocks until ctx cancel).
@@ -232,6 +251,7 @@ func run(parent context.Context) error {
 
 	// Bot stops on ctx cancel; wait for it.
 	<-botDone
+	<-providerSyncDone
 
 	// HTTP graceful shutdown.
 	// Graceful shutdown needs a fresh ctx: the parent is already cancelled here.

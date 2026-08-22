@@ -1,6 +1,6 @@
 # fitlog
 
-Personal Telegram assistant that pulls fitness data from **Whoop**, nutrition data from **FatSecret**, logs strength workouts, and publishes a random Markdown article from an **Obsidian** folder. The normal UI is a persistent four-button keyboard; slash commands provide a dated health report and a 30-day summary. Access to the bot is restricted by Telegram ID. There are no schedulers or background API polls.
+Personal Telegram assistant that pulls fitness data from **Whoop**, nutrition data from **FatSecret**, logs strength workouts, and publishes a random Markdown article from an **Obsidian** folder. The normal UI is a persistent four-button keyboard; slash commands provide a dated health report and a 30-day summary. Access to the bot is restricted by Telegram ID. The server refreshes provider-backed dashboard data at startup and then on a configurable interval.
 
 ## Stack
 
@@ -85,13 +85,25 @@ go run ./cmd/fitlog whoop-backfill --days 250 --dry-run
 go run ./cmd/fitlog whoop-backfill --days 250
 ```
 
-This is an operator-triggered reconciliation, not a background scheduler.
+The server also runs an automatic WHOOP refresh immediately at startup and
+then every `FITLOG_PROVIDER_SYNC_INTERVAL` (default `1h`). Each cycle refreshes
+today plus the previous `FITLOG_PROVIDER_SYNC_LOOKBACK_DAYS - 1` local days
+(default: a three-day correction window), so late WHOOP scoring is picked up.
+Set the interval to `0s` to disable the worker. Manual backfills remain useful
+for the initial long history import.
+
 WHOOP workouts are deliberately not converted into strength-training sessions,
 because they do not contain FitLog's exercise/set prescription and actuals.
 
+The same automatic cycle can refresh FatSecret, including the current partial
+day, but only when `FATSECRET_STORAGE_AUTHORIZED=true`. It remains disabled by
+default because standard FatSecret terms restrict persistent diary storage.
+A failure or missing OAuth connection for one provider does not stop the other
+provider or the bot. WHOOP report requests and the worker share a lock so a
+rotating refresh token cannot be consumed concurrently.
+
 The dashboard uses an HttpOnly signed session cookie. Mutating API calls also
-require `X-Fitlog-Request: 1`; the web client adds it automatically. WHOOP and
-FatSecret OAuth connections are not presented as continuous background sync.
+require `X-Fitlog-Request: 1`; the web client adds it automatically.
 
 See [Control Center operations and analytics](docs/control-center.md) for date
 semantics, formulas, import mapping, security, production topology, and known
@@ -114,6 +126,9 @@ limitations.
 | `TELEGRAM_WORKOUT_CHANNEL_ID`  | no       | Legacy single channel ID; combined with the plural setting           |
 | `FITLOG_DASHBOARD_TOKEN`       | no       | Long random secret; enables authenticated Control Center API         |
 | `FITLOG_DASHBOARD_OWNER_ID`    | no       | Owner override; defaults to first allowed Telegram user              |
+| `FITLOG_PROVIDER_SYNC_INTERVAL`| no       | Automatic refresh interval; default `1h`, `0s` disables it           |
+| `FITLOG_PROVIDER_SYNC_LOOKBACK_DAYS` | no | Correction window including today; default `3`                      |
+| `FATSECRET_STORAGE_AUTHORIZED` | no       | Enables automatic persistent FatSecret sync; default `false`         |
 | `HTTP_ADDR`                    | no       | Default `:8080`. Serves OAuth callbacks + DB-aware `/healthz`.       |
 | `TZ_LOCATION`                  | no       | Default `Europe/Moscow`. Used for "today"/"yesterday" boundaries.    |
 | `LOG_LEVEL`                    | no       | `debug` / `info` / `warn` / `error`. Default `info`.                 |

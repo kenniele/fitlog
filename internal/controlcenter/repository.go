@@ -285,7 +285,7 @@ func (r *PostgresRepository) Sources(ctx context.Context, ownerID int64) ([]Sour
 			) records GROUP BY source
 		)
 		SELECT known.source, known.label, last_updates.last_synced_at,
-			(provider_sync.synced_at IS NOT NULL) AS has_manual_sync
+			(provider_sync.synced_at IS NOT NULL) AS has_provider_sync
 		FROM known
 		LEFT JOIN last_updates ON last_updates.source = known.source
 		LEFT JOIN provider_sync ON provider_sync.source = known.source
@@ -297,14 +297,14 @@ func (r *PostgresRepository) Sources(ctx context.Context, ownerID int64) ([]Sour
 	statuses := make([]SourceStatus, 0, 2)
 	for rows.Next() {
 		var status SourceStatus
-		var hasManualSync bool
-		if err := rows.Scan(&status.Source, &status.Label, &status.LastSyncedAt, &hasManualSync); err != nil {
+		var hasProviderSync bool
+		if err := rows.Scan(&status.Source, &status.Label, &status.LastSyncedAt, &hasProviderSync); err != nil {
 			return nil, fmt.Errorf("scan source: %w", err)
 		}
 		status.Connected = false
-		if hasManualSync {
-			status.Status = "manual_sync"
-			status.Detail = "One-shot API backfill; no background synchronization"
+		if hasProviderSync {
+			status.Status = "provider_sync"
+			status.Detail = "Provider API data has been synchronized"
 		} else {
 			status.Status = "file_import_only"
 			status.Detail = "File import only; bot OAuth does not sync dashboard"

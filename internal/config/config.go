@@ -37,6 +37,10 @@ type Config struct {
 	DashboardToken   string `env:"FITLOG_DASHBOARD_TOKEN"`
 	DashboardOwnerID int64  `env:"FITLOG_DASHBOARD_OWNER_ID"`
 
+	ProviderSyncInterval       time.Duration `env:"FITLOG_PROVIDER_SYNC_INTERVAL" envDefault:"1h"`
+	ProviderSyncLookbackDays   int           `env:"FITLOG_PROVIDER_SYNC_LOOKBACK_DAYS" envDefault:"3"`
+	FatSecretStorageAuthorized bool          `env:"FATSECRET_STORAGE_AUTHORIZED" envDefault:"false"`
+
 	LogLevel   string `env:"LOG_LEVEL" envDefault:"info"`
 	HTTPAddr   string `env:"HTTP_ADDR" envDefault:":8080"`
 	TZLocation string `env:"TZ_LOCATION" envDefault:"Europe/Moscow"`

@@ -132,7 +132,7 @@ func TestPostgresRepository_UpsertWhoopHealth(t *testing.T) {
 	for _, status := range statuses {
 		if status.Source == "whoop" {
 			found = true
-			if status.Connected || status.Status != "manual_sync" || status.LastSyncedAt == nil {
+			if status.Connected || status.Status != "provider_sync" || status.LastSyncedAt == nil {
 				t.Fatalf("WHOOP sync status = %+v", status)
 			}
 		}

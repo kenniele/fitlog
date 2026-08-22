@@ -2,9 +2,35 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestLoadProviderSyncConfig(t *testing.T) {
+	for key, value := range map[string]string{
+		"DATABASE_URL":                       "postgres://fitlog:test@localhost/fitlog",
+		"FITLOG_TOKEN_ENCRYPTION_KEY":        "test-key",
+		"WHOOP_CLIENT_ID":                    "whoop-id",
+		"WHOOP_CLIENT_SECRET":                "whoop-secret",
+		"WHOOP_REDIRECT_URI":                 "https://fitlog.example/oauth/whoop/callback",
+		"FATSECRET_CONSUMER_KEY":             "fatsecret-key",
+		"FATSECRET_CONSUMER_SECRET":          "fatsecret-secret",
+		"TELEGRAM_BOT_TOKEN":                 "telegram-token",
+		"TELEGRAM_ALLOWED_USER_IDS":          "42",
+		"FITLOG_PROVIDER_SYNC_INTERVAL":      "45m",
+		"FITLOG_PROVIDER_SYNC_LOOKBACK_DAYS": "5",
+		"FATSECRET_STORAGE_AUTHORIZED":       "true",
+	} {
+		t.Setenv(key, value)
+	}
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 45*time.Minute, cfg.ProviderSyncInterval)
+	require.Equal(t, 5, cfg.ProviderSyncLookbackDays)
+	require.True(t, cfg.FatSecretStorageAuthorized)
+}
 
 func TestBaseURL(t *testing.T) {
 	cfg := Config{PublicBaseURL: "https://fitlog.example/path/", WhoopRedirectURI: "https://oauth.example/callback"}
