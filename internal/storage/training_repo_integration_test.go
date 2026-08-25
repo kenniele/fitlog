@@ -82,6 +82,17 @@ func TestTrainingRepo_Integration(t *testing.T) {
 	require.True(t, session.Active())
 	require.Equal(t, 1, session.CurrentPosition)
 	require.Len(t, session.Exercises, 2)
+	firstExerciseID := session.Exercises[0].ID
+	secondExerciseID := session.Exercises[1].ID
+
+	session, err = repo.PrioritizeExercise(ctx, ownerID, secondExerciseID)
+	require.NoError(t, err)
+	require.Equal(t, secondExerciseID, session.CurrentExercise().ID)
+	require.Equal(t, []int{1, 2}, []int{session.Exercises[0].Position, session.Exercises[1].Position})
+	session, err = repo.PrioritizeExercise(ctx, ownerID, firstExerciseID)
+	require.NoError(t, err)
+	require.Equal(t, firstExerciseID, session.CurrentExercise().ID)
+	require.Equal(t, []int{1, 2}, []int{session.Exercises[0].Position, session.Exercises[1].Position})
 
 	_, err = repo.StartSession(ctx, ownerID, programs[0].ID, startedAt)
 	require.ErrorIs(t, err, training.ErrActiveSession)
@@ -282,6 +293,53 @@ func TestTrainingRepo_Integration(t *testing.T) {
 	).Scan(&exercises, &sets))
 	require.Zero(t, exercises, "session exercises are deleted through cascading foreign keys")
 	require.Zero(t, sets, "training sets are deleted through cascading foreign keys")
+}
+
+func TestTrainingRepo_PrioritizeExerciseIntegration(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping integration test")
+	}
+	ctx := context.Background()
+	pool, err := NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	const ownerID int64 = 987654322
+	cleanup := func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM training_sessions WHERE owner_id = $1`, ownerID)
+		_, _ = pool.Exec(ctx, `DELETE FROM training_programs WHERE owner_id = $1`, ownerID)
+		_, _ = pool.Exec(ctx, `DELETE FROM training_exercises WHERE owner_id = $1`, ownerID)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	repo := NewTrainingRepo(pool)
+	require.NoError(t, repo.ReplacePrograms(ctx, ownerID, []training.ProgramInput{{
+		Name: "Порядок", Exercises: []string{"Первое", "Второе", "Третье"},
+	}}))
+	programs, err := repo.ListPrograms(ctx, ownerID)
+	require.NoError(t, err)
+	require.Len(t, programs, 1)
+	session, err := repo.StartSession(ctx, ownerID, programs[0].ID, time.Now())
+	require.NoError(t, err)
+	require.Len(t, session.Exercises, 3)
+
+	thirdID := session.Exercises[2].ID
+	session, err = repo.PrioritizeExercise(ctx, ownerID, thirdID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"Третье", "Первое", "Второе"}, []string{
+		session.Exercises[0].Name, session.Exercises[1].Name, session.Exercises[2].Name,
+	})
+	require.Equal(t, []int{1, 2, 3}, []int{
+		session.Exercises[0].Position, session.Exercises[1].Position, session.Exercises[2].Position,
+	})
+	require.Equal(t, thirdID, session.CurrentExercise().ID)
+
+	session, err = repo.FinishCurrentExercise(ctx, ownerID, time.Now())
+	require.NoError(t, err)
+	_, err = repo.PrioritizeExercise(ctx, ownerID, thirdID)
+	require.ErrorIs(t, err, training.ErrNotEditable, "a completed exercise cannot be moved back into the active queue")
 }
 
 func TestTrainingRepo_ProgramsV1Integration(t *testing.T) {

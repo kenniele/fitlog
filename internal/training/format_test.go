@@ -132,6 +132,29 @@ func TestStructuredCardsShowAdditionalWarmupAndLatestCurrentWeight(t *testing.T)
 	require.Equal(t, 2, warmup)
 }
 
+func TestStructuredCardKeepsAdditionalWorkingSetsVisible(t *testing.T) {
+	weight := 60.0
+	reps := 10
+	session := Session{
+		ProgramName: "Фуллбади A", Status: "active", CurrentPosition: 1,
+		StartedAt: time.Date(2026, 8, 25, 8, 0, 0, 0, time.UTC),
+		Exercises: []SessionExercise{{
+			Position: 1, Name: "Жим",
+			Plan: Recommendation{WeightKG: &weight, MinReps: 8, MaxReps: 12, WorkingSets: 1, TargetRIR: 2},
+			Sets: []WorkoutSet{
+				{Position: 1, Type: SetTypeWorking, ActualWeightKG: &weight, ActualReps: &reps, Reps: reps},
+				{Position: 2, Type: SetTypeWorking, ActualWeightKG: &weight, ActualReps: &reps, Reps: reps},
+			},
+		}},
+	}
+
+	got := FormatActiveCard(session, nil, time.UTC, "")
+
+	require.Contains(t, got, "1 / 1 рабочих подходов · +1 дополнительно")
+	require.Contains(t, got, "✅ дополнительно · 10Р 60КГ")
+	require.Contains(t, got, "План выполнен. Можно добавить подход или завершить упражнение.")
+}
+
 func TestFormatFinishedMarksDropSetsWithoutCountingThemAsWorking(t *testing.T) {
 	weight := 30.0
 	reps := 12

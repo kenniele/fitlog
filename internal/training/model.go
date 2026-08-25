@@ -288,10 +288,6 @@ func (e SessionExercise) NextWorkingWeightKG() *float64 {
 	return latest.WeightKG
 }
 
-func (e SessionExercise) PlanComplete() bool {
-	return e.Structured() && len(e.WarmupSets()) >= len(e.Warmup) && len(e.WorkingSets()) >= e.Plan.WorkingSets
-}
-
 type Session struct {
 	ID      int64
 	OwnerID int64
@@ -381,6 +377,7 @@ type Repository interface {
 	AddSet(ctx context.Context, ownerID int64, input SetInput) (Session, error)
 	OverrideCurrentExercise(ctx context.Context, ownerID int64, override ExerciseOverride) (Session, error)
 	SetCurrentExerciseNote(ctx context.Context, ownerID int64, note string) (Session, error)
+	PrioritizeExercise(ctx context.Context, ownerID, exerciseID int64) (Session, error)
 	FinishCurrentExercise(ctx context.Context, ownerID int64, now time.Time) (Session, error)
 	ReopenExercise(ctx context.Context, ownerID, sessionID, exerciseID int64) (Session, error)
 	PreviousExercise(ctx context.Context, ownerID, sessionID int64, exerciseName string) (*PreviousExercise, error)

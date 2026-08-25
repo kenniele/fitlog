@@ -34,6 +34,20 @@ func TestTrainingPairRoundTrip(t *testing.T) {
 	require.LessOrEqual(t, len("\f"+trainingCallbackWorkingReps+"|"+payload), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackWarmupDone+"|"+payload), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackAddWarmup+"|"+maxID), 64)
+	require.LessOrEqual(t, len("\f"+trainingCallbackPrioritizeExercise+"|"+maxID), 64)
+}
+
+func TestHasAnotherUnfinishedExercise(t *testing.T) {
+	session := training.Session{Exercises: []training.SessionExercise{
+		{ID: 1, Complete: false},
+		{ID: 2, Complete: true},
+		{ID: 3, Complete: false},
+	}}
+	require.True(t, hasAnotherUnfinishedExercise(session, 1))
+	require.True(t, hasAnotherUnfinishedExercise(session, 3))
+
+	session.Exercises[2].Complete = true
+	require.False(t, hasAnotherUnfinishedExercise(session, 1))
 }
 
 func TestStripYAMLCodeBlock(t *testing.T) {

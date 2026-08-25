@@ -1175,6 +1175,82 @@ func (r *TrainingRepo) SetCurrentExerciseNote(ctx context.Context, ownerID int64
 	return r.loadSession(ctx, r.pool, ownerID, sessionID)
 }
 
+// PrioritizeExercise moves a later unfinished exercise directly before the
+// current one. Positions are rotated through a temporary range above the
+// session maximum so the non-deferrable unique position constraint is never
+// violated while the order is being changed.
+func (r *TrainingRepo) PrioritizeExercise(
+	ctx context.Context,
+	ownerID, targetExerciseID int64,
+) (training.Session, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return training.Session{}, fmt.Errorf("begin prioritize exercise: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	sessionID, currentExerciseID, err := lockCurrentExercise(ctx, tx, ownerID)
+	if err != nil {
+		return training.Session{}, err
+	}
+	var currentPosition, targetPosition, maxPosition int
+	var targetComplete bool
+	if err := tx.QueryRow(ctx, `
+		SELECT current_exercise.position, target_exercise.position, target_exercise.complete,
+		       (SELECT max(position) FROM training_session_exercises WHERE session_id = current_exercise.session_id)
+		FROM training_session_exercises current_exercise
+		JOIN training_session_exercises target_exercise
+		  ON target_exercise.session_id = current_exercise.session_id
+		WHERE current_exercise.id = $1 AND target_exercise.id = $2
+		FOR UPDATE OF target_exercise`, currentExerciseID, targetExerciseID,
+	).Scan(&currentPosition, &targetPosition, &targetComplete, &maxPosition); errors.Is(err, pgx.ErrNoRows) {
+		return training.Session{}, training.ErrNotEditable
+	} else if err != nil {
+		return training.Session{}, fmt.Errorf("select exercise to prioritize: %w", err)
+	}
+	if targetComplete || targetPosition <= currentPosition {
+		return training.Session{}, training.ErrNotEditable
+	}
+
+	offset := maxPosition + 1
+	if _, err := tx.Exec(ctx, `
+		UPDATE training_session_exercises
+		SET position = position + $1, updated_at = now()
+		WHERE session_id = $2 AND position BETWEEN $3 AND $4`,
+		offset, sessionID, currentPosition, targetPosition,
+	); err != nil {
+		return training.Session{}, fmt.Errorf("reserve exercise positions: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE training_session_exercises SET position = $1, updated_at = now() WHERE id = $2`,
+		currentPosition, targetExerciseID,
+	); err != nil {
+		return training.Session{}, fmt.Errorf("prioritize exercise: %w", err)
+	}
+	reservedStart := currentPosition + offset
+	reservedEnd := targetPosition + offset
+	if _, err := tx.Exec(ctx, `
+		UPDATE training_session_exercises
+		SET position = position - $1 + 1, updated_at = now()
+		WHERE session_id = $2 AND position >= $3 AND position < $4`,
+		offset, sessionID, reservedStart, reservedEnd,
+	); err != nil {
+		return training.Session{}, fmt.Errorf("compact exercise positions: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE training_sessions
+		SET current_position = $1, rest_until = NULL, updated_at = now()
+		WHERE id = $2`,
+		currentPosition, sessionID,
+	); err != nil {
+		return training.Session{}, fmt.Errorf("select prioritized exercise: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return training.Session{}, fmt.Errorf("commit prioritize exercise: %w", err)
+	}
+	return r.loadSession(ctx, r.pool, ownerID, sessionID)
+}
+
 func (r *TrainingRepo) FinishCurrentExercise(ctx context.Context, ownerID int64, now time.Time) (training.Session, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {

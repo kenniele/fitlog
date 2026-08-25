@@ -28,6 +28,8 @@ const (
 	trainingCallbackWorkingReps             = "training_work_reps"
 	trainingCallbackRIR                     = "training_rir"
 	trainingCallbackOverride                = "training_override"
+	trainingCallbackReorder                 = "training_reorder"
+	trainingCallbackPrioritizeExercise      = "training_prioritize_ex"
 	trainingCallbackFinishExercise          = "training_finish_exercise"
 	trainingCallbackNote                    = "training_note"
 	trainingCallbackPrograms                = "training_programs"
@@ -73,6 +75,8 @@ func (b *Bot) registerTrainingHandlers() {
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackWorkingReps}, b.handleTrainingWorkingReps, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackRIR}, b.handleTrainingRIR, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackOverride}, b.handleTrainingOverride, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackReorder}, b.handleTrainingReorder, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackPrioritizeExercise}, b.handleTrainingPrioritizeExercise, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackFinishExercise}, b.handleTrainingFinishExercise, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackNote}, b.handleTrainingNote, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackPrograms}, b.handleTrainingPrograms, currentCard)
@@ -373,6 +377,47 @@ func (b *Bot) handleTrainingNote(c tele.Context) error {
 		return b.showTrainingFailure(ctx, c, ownerID, err)
 	}
 	return b.showActiveTraining(ctx, c, session, "Отправь заметку для этого упражнения")
+}
+
+func (b *Bot) handleTrainingReorder(c tele.Context) error {
+	b.respond(c)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	if err := b.deps.Training.ClearInput(ctx, ownerID); err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	session, err := b.deps.Training.Active(ctx, ownerID)
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	return b.showTrainingReorder(ctx, c, session, "")
+}
+
+func (b *Bot) handleTrainingPrioritizeExercise(c tele.Context) error {
+	b.respond(c)
+	exerciseID, err := parseTrainingID(c.Data())
+	if err != nil {
+		return fmt.Errorf("invalid training prioritize callback %q: %w", c.Data(), err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ownerID := c.Sender().ID
+	session, err := b.deps.Training.PrioritizeExercise(ctx, ownerID, exerciseID)
+	if errors.Is(err, training.ErrNotEditable) {
+		if active, activeErr := b.deps.Training.Active(ctx, ownerID); activeErr == nil {
+			return b.showActiveTraining(ctx, c, active, "Порядок уже изменился. Выбери упражнение ещё раз.")
+		}
+	}
+	if err != nil {
+		return b.showTrainingFailure(ctx, c, ownerID, err)
+	}
+	current := session.CurrentExercise()
+	notice := "Порядок упражнений изменён."
+	if current != nil {
+		notice += " Сейчас: " + current.Name + "."
+	}
+	return b.showActiveTraining(ctx, c, session, notice)
 }
 
 func (b *Bot) handleTrainingFinishExercise(c tele.Context) error {
@@ -1290,13 +1335,20 @@ func (b *Bot) showActiveTraining(ctx context.Context, c tele.Context, session tr
 				}
 				rows = append(rows, markup.Row(markup.Data("Другой вес / повторы", trainingCallbackAddSet, exerciseID)))
 			}
+		} else {
+			rows = append(rows, markup.Row(markup.Data("➕ Дополнительный подход", trainingCallbackAddSet, exerciseID)))
 		}
 		rows = append(rows,
 			markup.Row(
 				markup.Data("✏️ Изменить рекомендацию", trainingCallbackOverride, exerciseID),
 				markup.Data("📝 Заметка", trainingCallbackNote, exerciseID),
 			),
-			markup.Row(markup.Data("⏭ Завершить упражнение", trainingCallbackFinishExercise, exerciseID)),
+		)
+		if hasAnotherUnfinishedExercise(session, exercise.ID) {
+			rows = append(rows, markup.Row(markup.Data("🔀 Изменить порядок", trainingCallbackReorder)))
+		}
+		rows = append(rows,
+			markup.Row(markup.Data("✅ Завершить упражнение", trainingCallbackFinishExercise, exerciseID)),
 			markup.Row(markup.Data("🗑 Удалить тренировку", trainingCallbackDelete, sessionID)),
 		)
 		markup.Inline(rows...)
@@ -1304,7 +1356,7 @@ func (b *Bot) showActiveTraining(ctx context.Context, c tele.Context, session tr
 			training.FormatActiveCard(session, previous, b.deps.Location, prompt), markup,
 		)
 	}
-	markup.Inline(
+	rows := []tele.Row{
 		markup.Row(
 			markup.Data("➕ Подход", trainingCallbackAddSet, exerciseID),
 			markup.Data("✅ Конец упражнения", trainingCallbackFinishExercise, exerciseID),
@@ -1313,11 +1365,54 @@ func (b *Bot) showActiveTraining(ctx context.Context, c tele.Context, session tr
 			markup.Data("📝 Заметка", trainingCallbackNote, exerciseID),
 			markup.Data("✏️ Исправить", trainingCallbackEdit, sessionID),
 		),
-		markup.Row(markup.Data("🗑 Удалить тренировку", trainingCallbackDelete, sessionID)),
-	)
+	}
+	if hasAnotherUnfinishedExercise(session, exercise.ID) {
+		rows = append(rows, markup.Row(markup.Data("🔀 Изменить порядок", trainingCallbackReorder)))
+	}
+	rows = append(rows, markup.Row(markup.Data("🗑 Удалить тренировку", trainingCallbackDelete, sessionID)))
+	markup.Inline(rows...)
 	return b.editTrainingCard(ctx, c, session.OwnerID,
 		training.FormatActiveCard(session, previous, b.deps.Location, prompt), markup,
 	)
+}
+
+func (b *Bot) showTrainingReorder(ctx context.Context, c tele.Context, session training.Session, notice string) error {
+	current := session.CurrentExercise()
+	if current == nil {
+		return b.showTrainingFailure(ctx, c, session.OwnerID, training.ErrNotFound)
+	}
+	var text strings.Builder
+	text.WriteString("<b>🔀 Изменить порядок</b>\n\n")
+	text.WriteString("Сейчас: <b>" + html.EscapeString(current.Name) + "</b>\n\n")
+	text.WriteString("Выбери упражнение, которое выполнить сейчас. Оно встанет перед текущим, а текущее останется в очереди.")
+	if notice != "" {
+		text.WriteString("\n\n<b>" + html.EscapeString(notice) + "</b>")
+	}
+
+	markup := &tele.ReplyMarkup{}
+	rows := make([]tele.Row, 0, len(session.Exercises))
+	for _, exercise := range session.Exercises {
+		if exercise.Complete || exercise.ID == current.ID {
+			continue
+		}
+		rows = append(rows, markup.Row(markup.Data(
+			truncateTrainingButton(fmt.Sprintf("%d. %s", exercise.Position, exercise.Name)),
+			trainingCallbackPrioritizeExercise,
+			strconv.FormatInt(exercise.ID, 10),
+		)))
+	}
+	rows = append(rows, markup.Row(markup.Data("‹ Назад", trainingCallbackContinue)))
+	markup.Inline(rows...)
+	return b.editTrainingCard(ctx, c, session.OwnerID, text.String(), markup)
+}
+
+func hasAnotherUnfinishedExercise(session training.Session, currentExerciseID int64) bool {
+	for _, exercise := range session.Exercises {
+		if !exercise.Complete && exercise.ID != currentExerciseID {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Bot) showFinishedTraining(ctx context.Context, c tele.Context, session training.Session, notice string) error {

@@ -75,14 +75,22 @@ func FormatActiveCard(session Session, previous *PreviousExercise, loc *time.Loc
 
 func formatStructuredActiveCard(session Session, exercise SessionExercise, loc *time.Location, prompt string) string {
 	var out strings.Builder
-	totalWorking, completedWorking := 0, 0
+	totalWorking, completedWorking, additionalWorking := 0, 0, 0
 	for _, item := range session.Exercises {
 		totalWorking += item.Plan.WorkingSets
-		completedWorking += len(item.WorkingSets())
+		completed := len(item.WorkingSets())
+		completedWorking += min(completed, item.Plan.WorkingSets)
+		if completed > item.Plan.WorkingSets {
+			additionalWorking += completed - item.Plan.WorkingSets
+		}
 	}
 	fmt.Fprintf(&out, "<b>🏋️ %s</b>\n", html.EscapeString(session.ProgramName))
 	fmt.Fprintf(&out, "%s · %d / %d упражнений\n", session.StartedAt.In(loc).Format("02.01.2006"), exercise.Position, len(session.Exercises))
-	fmt.Fprintf(&out, "%d / %d рабочих подходов\n\n", completedWorking, totalWorking)
+	fmt.Fprintf(&out, "%d / %d рабочих подходов", completedWorking, totalWorking)
+	if additionalWorking > 0 {
+		fmt.Fprintf(&out, " · +%d дополнительно", additionalWorking)
+	}
+	out.WriteString("\n\n")
 	fmt.Fprintf(&out, "<b>%s</b>\n", html.EscapeString(exercise.Name))
 
 	warmups := exercise.WarmupSets()
@@ -121,6 +129,12 @@ func formatStructuredActiveCard(session Session, exercise SessionExercise, loc *
 		default:
 			fmt.Fprintf(&out, "○ %s\n", formatPlanSet(nextWeight, exercise.Plan.MinReps, exercise.Plan.MaxReps))
 		}
+	}
+	for index := exercise.Plan.WorkingSets; index < len(working); index++ {
+		fmt.Fprintf(&out, "✅ дополнительно · %s\n", FormatSetDetailed(working[index]))
+	}
+	if len(working) >= exercise.Plan.WorkingSets {
+		out.WriteString("\n✅ План выполнен. Можно добавить подход или завершить упражнение.")
 	}
 	fmt.Fprintf(&out, "\nЦель: RIR %s · отдых между подходами: %s", formatDecimal(exercise.Plan.TargetRIR), formatSeconds(exercise.Plan.RestSeconds))
 	if exercise.Overridden {

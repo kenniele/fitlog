@@ -30,6 +30,7 @@ type stateRepository struct {
 	lastSet                   SetInput
 	override                  ExerciseOverride
 	finishCalled              bool
+	prioritizedExerciseID     int64
 }
 
 func (r *stateRepository) GetUIState(context.Context, int64) (UIState, error) {
@@ -118,6 +119,33 @@ func (r *stateRepository) FinishCurrentExercise(_ context.Context, _ int64, _ ti
 	r.finishCalled = true
 	session := r.activeSession
 	session.Status = "finished"
+	r.activeSession = session
+	return session, nil
+}
+
+func (r *stateRepository) PrioritizeExercise(_ context.Context, _ int64, exerciseID int64) (Session, error) {
+	r.prioritizedExerciseID = exerciseID
+	session := r.activeSession
+	current := session.CurrentExercise()
+	var target *SessionExercise
+	for index := range session.Exercises {
+		if session.Exercises[index].ID == exerciseID {
+			target = &session.Exercises[index]
+			break
+		}
+	}
+	if current == nil || target == nil || target.Complete || target.Position <= current.Position {
+		return Session{}, ErrNotEditable
+	}
+	currentPosition := current.Position
+	targetPosition := target.Position
+	for index := range session.Exercises {
+		position := session.Exercises[index].Position
+		if position >= currentPosition && position < targetPosition {
+			session.Exercises[index].Position++
+		}
+	}
+	target.Position = currentPosition
 	r.activeSession = session
 	return session, nil
 }
@@ -301,7 +329,7 @@ func TestProgramExerciseCanBeReplacedWithNewAndHistory(t *testing.T) {
 	require.True(t, repo.replacedHistory)
 }
 
-func TestPlannedWorkingSetCollectsNullableRIRAndFinishesExercise(t *testing.T) {
+func TestPlannedWorkingSetWaitsForExplicitFinishAndAllowsAdditionalSet(t *testing.T) {
 	weight := 60.0
 	repo := &stateRepository{
 		state: UIState{OwnerID: 42},
@@ -319,11 +347,47 @@ func TestPlannedWorkingSetCollectsNullableRIRAndFinishesExercise(t *testing.T) {
 
 	session, err := usecase.CompletePendingSet(context.Background(), 42, nil, time.Now())
 	require.NoError(t, err)
-	require.True(t, repo.finishCalled)
-	require.False(t, session.Active())
+	require.False(t, repo.finishCalled)
+	require.True(t, session.Active())
 	require.Nil(t, repo.lastSet.RIR)
 	require.Equal(t, SetTypeWorking, repo.lastSet.Type)
 	require.Equal(t, InputNone, repo.state.Mode)
+
+	_, err = usecase.PrepareWorkingSet(context.Background(), 42, 10)
+	require.NoError(t, err, "the completed plan must still accept an additional set")
+	session, err = usecase.CompletePendingSet(context.Background(), 42, nil, time.Now())
+	require.NoError(t, err)
+	require.Len(t, session.CurrentExercise().WorkingSets(), 2)
+	require.False(t, repo.finishCalled)
+
+	session, err = usecase.FinishExercise(context.Background(), 42, time.Now())
+	require.NoError(t, err)
+	require.True(t, repo.finishCalled)
+	require.False(t, session.Active())
+}
+
+func TestPrioritizeExerciseMovesItBeforeCurrentAndClearsPendingInput(t *testing.T) {
+	repo := &stateRepository{
+		state: UIState{OwnerID: 42, Mode: InputNote},
+		activeSession: Session{ID: 1, OwnerID: 42, Status: "active", CurrentPosition: 1, Exercises: []SessionExercise{
+			{ID: 10, Position: 1, Name: "Жим"},
+			{ID: 11, Position: 2, Name: "Тяга"},
+			{ID: 12, Position: 3, Name: "Присед"},
+		}},
+	}
+
+	session, err := NewUseCase(repo).PrioritizeExercise(context.Background(), 42, 12)
+
+	require.NoError(t, err)
+	require.Equal(t, int64(12), repo.prioritizedExerciseID)
+	require.Equal(t, InputNone, repo.state.Mode)
+	require.Equal(t, int64(12), session.CurrentExercise().ID)
+	require.Equal(t, []int64{10, 11, 12}, []int64{
+		session.Exercises[0].ID, session.Exercises[1].ID, session.Exercises[2].ID,
+	}, "the loaded slice keeps identity order in the fake")
+	require.Equal(t, []int{2, 3, 1}, []int{
+		session.Exercises[0].Position, session.Exercises[1].Position, session.Exercises[2].Position,
+	})
 }
 
 func TestAdditionalWarmupIsStoredAsWarmupBeforeWorkingSets(t *testing.T) {

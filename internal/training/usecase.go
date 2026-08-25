@@ -507,7 +507,7 @@ func (u *UseCase) AddSet(ctx context.Context, ownerID int64, raw string) (Sessio
 	if err := u.ClearInput(ctx, ownerID); err != nil {
 		return Session{}, err
 	}
-	return u.finishWhenPlanComplete(ctx, ownerID, session, input.CompletedAt)
+	return session, nil
 }
 
 func (u *UseCase) CompleteWarmup(ctx context.Context, ownerID int64, now time.Time) (Session, error) {
@@ -614,9 +614,6 @@ func (u *UseCase) prepareWorkingSet(
 	if exercise == nil || !exercise.Structured() || len(exercise.WarmupSets()) < len(exercise.Warmup) {
 		return Session{}, ErrNotEditable
 	}
-	if len(exercise.WorkingSets()) >= exercise.Plan.WorkingSets {
-		return Session{}, ErrNotEditable
-	}
 	state, err := u.State(ctx, ownerID)
 	if err != nil {
 		return Session{}, err
@@ -660,7 +657,7 @@ func (u *UseCase) CompletePendingSet(
 	if err := u.ClearInput(ctx, ownerID); err != nil {
 		return Session{}, err
 	}
-	return u.finishWhenPlanComplete(ctx, ownerID, session, now)
+	return session, nil
 }
 
 func (u *UseCase) BeginOverride(ctx context.Context, ownerID int64) (Session, error) {
@@ -759,19 +756,6 @@ func parseOverrideRepRange(raw string) (RepRange, error) {
 	return RepRange{Min: min, Max: max}, nil
 }
 
-func (u *UseCase) finishWhenPlanComplete(
-	ctx context.Context,
-	ownerID int64,
-	session Session,
-	now time.Time,
-) (Session, error) {
-	exercise := session.CurrentExercise()
-	if exercise == nil || !exercise.PlanComplete() {
-		return session, nil
-	}
-	return u.repo.FinishCurrentExercise(ctx, ownerID, now)
-}
-
 func cloneFloat(value *float64) *float64 {
 	if value == nil {
 		return nil
@@ -803,6 +787,13 @@ func (u *UseCase) FinishExercise(ctx context.Context, ownerID int64, now time.Ti
 		return Session{}, err
 	}
 	return u.repo.FinishCurrentExercise(ctx, ownerID, now)
+}
+
+func (u *UseCase) PrioritizeExercise(ctx context.Context, ownerID, exerciseID int64) (Session, error) {
+	if err := u.ClearInput(ctx, ownerID); err != nil {
+		return Session{}, err
+	}
+	return u.repo.PrioritizeExercise(ctx, ownerID, exerciseID)
 }
 
 func (u *UseCase) ReopenExercise(ctx context.Context, ownerID, sessionID, exerciseID int64) (Session, error) {
