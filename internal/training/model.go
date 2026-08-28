@@ -272,20 +272,19 @@ func (e SessionExercise) WorkingSets() []WorkoutSet {
 	return sets
 }
 
-// NextWorkingWeightKG returns the weight to prefill for the next working set.
-// Once the athlete has completed a working set in the current workout, its
-// actual weight takes precedence over the recommendation snapshotted from
-// previous workouts.
-func (e SessionExercise) NextWorkingWeightKG() *float64 {
+// LastWorkingWeightKG returns the actual weight from the latest working set in
+// the current exercise. The boolean distinguishes no previous set from a
+// bodyweight set, for which the weight itself is nil.
+func (e SessionExercise) LastWorkingWeightKG() (*float64, bool) {
 	working := e.WorkingSets()
 	if len(working) == 0 {
-		return e.Plan.WeightKG
+		return nil, false
 	}
 	latest := working[len(working)-1]
 	if latest.ActualWeightKG != nil {
-		return latest.ActualWeightKG
+		return latest.ActualWeightKG, true
 	}
-	return latest.WeightKG
+	return latest.WeightKG, true
 }
 
 type Session struct {

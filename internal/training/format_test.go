@@ -56,11 +56,11 @@ func TestFormatActiveAndFinished(t *testing.T) {
 	require.Contains(t, finished, "Начало: 12:00 · Конец: 13:15")
 	require.Contains(t, finished, "Длительность: 1 ч 15 мин")
 	require.Contains(t, finished, "пропуск")
-	require.Contains(t, finished, "Подходов: 2")
+	require.Contains(t, finished, "Обычных подходов: 2 · Разминочных: 0")
 	require.Contains(t, finished, "Пропусков: 1")
 }
 
-func TestFormatActiveCardShowsOnlyCurrentStructuredAction(t *testing.T) {
+func TestFormatActiveCardDoesNotRenderRecommendations(t *testing.T) {
 	weight := 62.5
 	restUntil := time.Now().Add(3 * time.Minute)
 	session := Session{
@@ -81,19 +81,20 @@ func TestFormatActiveCardShowsOnlyCurrentStructuredAction(t *testing.T) {
 	got := FormatActiveCard(session, nil, time.UTC, "")
 
 	require.Contains(t, got, "Жим штанги лёжа")
-	require.Contains(t, got, "2 / 2 упражнений")
-	require.Contains(t, got, "➡️ гриф × 10")
-	require.Contains(t, got, "○ 62.5 кг × 8–12")
-	require.Contains(t, got, "RIR 2 · отдых между подходами: 180 секунд")
+	require.Contains(t, got, "Упражнение 2 из 2")
+	require.Contains(t, got, "Текущие подходы: пока нет.")
 	require.Contains(t, got, "Отдых перед упражнением: <b>180 секунд</b>")
-	require.NotContains(t, got, "Отдых до")
-	require.Contains(t, got, "Почему:")
+	require.NotContains(t, got, "62.5 кг × 8–12")
+	require.NotContains(t, got, "Почему:")
+	require.NotContains(t, got, "Рекомендация")
 }
 
-func TestStructuredCardsShowAdditionalWarmupAndLatestCurrentWeight(t *testing.T) {
+func TestCardsSeparateWarmupFromOrdinaryAndShowLastWeight(t *testing.T) {
 	recommendedWeight := 35.0
 	actualWeight := 40.8
 	warmupWeight := 20.0
+	warmupRIR := 9.0
+	workingRIR := 2.0
 	actualWarmupReps := 10
 	actualWorkingReps := 12
 	session := Session{
@@ -105,18 +106,19 @@ func TestStructuredCardsShowAdditionalWarmupAndLatestCurrentWeight(t *testing.T)
 			Recommendation: Recommendation{WeightKG: &recommendedWeight, MinReps: 8, MaxReps: 12, WorkingSets: 3, Reason: "Вес из истории."},
 			Plan:           Recommendation{WeightKG: &recommendedWeight, MinReps: 8, MaxReps: 12, WorkingSets: 3},
 			Sets: []WorkoutSet{
-				{Position: 1, Type: SetTypeWarmup, ActualReps: &actualWarmupReps, Reps: actualWarmupReps},
+				{Position: 1, Type: SetTypeWarmup, ActualReps: &actualWarmupReps, ActualRIR: &warmupRIR, Reps: actualWarmupReps},
 				{Position: 2, Type: SetTypeWarmup, ActualWeightKG: &warmupWeight, ActualReps: &actualWarmupReps, Reps: actualWarmupReps},
-				{Position: 3, Type: SetTypeWorking, ActualWeightKG: &actualWeight, ActualReps: &actualWorkingReps, Reps: actualWorkingReps},
+				{Position: 3, Type: SetTypeWorking, ActualWeightKG: &actualWeight, ActualReps: &actualWorkingReps, ActualRIR: &workingRIR, Reps: actualWorkingReps},
 			},
 		}},
 	}
 
 	active := FormatActiveCard(session, nil, time.UTC, "")
-	require.Contains(t, active, "✅ гриф × 10")
-	require.Contains(t, active, "✅ дополнительно · 10Р 20КГ")
-	require.Contains(t, active, "➡️ 40.8 кг × 8–12")
-	require.Contains(t, active, "Повторяем последний фактический вес этой тренировки: 40.8 кг.")
+	require.Contains(t, active, "1. разминка · 10Р -")
+	require.Contains(t, active, "2. разминка · 10Р 20КГ")
+	require.Contains(t, active, "3. 12Р 40.8КГ @ RIR 2")
+	require.Contains(t, active, "Последний вес: 40.8 кг.")
+	require.NotContains(t, active, "разминка · 10Р - @ RIR")
 	require.NotContains(t, active, "Вес из истории.")
 
 	finishedAt := session.StartedAt.Add(time.Hour)
@@ -125,34 +127,36 @@ func TestStructuredCardsShowAdditionalWarmupAndLatestCurrentWeight(t *testing.T)
 	finished := FormatFinished(session, time.UTC)
 	require.Contains(t, finished, "разминка · гриф × 10")
 	require.Contains(t, finished, "разминка · 10Р 20КГ")
-	require.Contains(t, finished, "Рабочих подходов: 1 · Разминочных: 2")
+	require.Contains(t, finished, "12Р 40.8КГ @ RIR 2")
+	require.NotContains(t, finished, "разминка · гриф × 10 @ RIR")
+	require.Contains(t, finished, "Обычных подходов: 1 · Разминочных: 2")
 
 	working, warmup := session.SetCounts()
 	require.Equal(t, 1, working)
 	require.Equal(t, 2, warmup)
 }
 
-func TestStructuredCardKeepsAdditionalWorkingSetsVisible(t *testing.T) {
+func TestActiveCardKeepsEveryManuallyAddedSetVisible(t *testing.T) {
 	weight := 60.0
 	reps := 10
+	rir := 2.0
 	session := Session{
 		ProgramName: "Фуллбади A", Status: "active", CurrentPosition: 1,
 		StartedAt: time.Date(2026, 8, 25, 8, 0, 0, 0, time.UTC),
 		Exercises: []SessionExercise{{
 			Position: 1, Name: "Жим",
-			Plan: Recommendation{WeightKG: &weight, MinReps: 8, MaxReps: 12, WorkingSets: 1, TargetRIR: 2},
 			Sets: []WorkoutSet{
-				{Position: 1, Type: SetTypeWorking, ActualWeightKG: &weight, ActualReps: &reps, Reps: reps},
-				{Position: 2, Type: SetTypeWorking, ActualWeightKG: &weight, ActualReps: &reps, Reps: reps},
+				{Position: 1, Type: SetTypeWorking, ActualWeightKG: &weight, ActualReps: &reps, ActualRIR: &rir, Reps: reps},
+				{Position: 2, Type: SetTypeWorking, ActualWeightKG: &weight, ActualReps: &reps, ActualRIR: &rir, Reps: reps},
 			},
 		}},
 	}
 
 	got := FormatActiveCard(session, nil, time.UTC, "")
 
-	require.Contains(t, got, "1 / 1 рабочих подходов · +1 дополнительно")
-	require.Contains(t, got, "✅ дополнительно · 10Р 60КГ")
-	require.Contains(t, got, "План выполнен. Можно добавить подход или завершить упражнение.")
+	require.Contains(t, got, "1. 10Р 60КГ @ RIR 2")
+	require.Contains(t, got, "2. 10Р 60КГ @ RIR 2")
+	require.NotContains(t, got, "План выполнен")
 }
 
 func TestFormatFinishedMarksDropSetsWithoutCountingThemAsWorking(t *testing.T) {
@@ -170,7 +174,7 @@ func TestFormatFinishedMarksDropSetsWithoutCountingThemAsWorking(t *testing.T) {
 
 	got := FormatFinished(session, time.UTC)
 	require.Contains(t, got, "drop · 12Р 30КГ")
-	require.Contains(t, got, "Рабочих подходов: 1")
+	require.Contains(t, got, "Обычных подходов: 1")
 	require.Contains(t, got, "Drop: 1")
 }
 

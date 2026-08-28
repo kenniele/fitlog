@@ -31,9 +31,9 @@ func TestTrainingPairRoundTrip(t *testing.T) {
 	require.LessOrEqual(t, len("\f"+trainingCallbackProgramExerciseExisting+"|"+maxID), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackProgramExerciseHistory), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackImportExisting+"|"+maxID), 64)
-	require.LessOrEqual(t, len("\f"+trainingCallbackWorkingReps+"|"+payload), 64)
-	require.LessOrEqual(t, len("\f"+trainingCallbackWarmupDone+"|"+payload), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackAddWarmup+"|"+maxID), 64)
+	require.LessOrEqual(t, len("\f"+trainingCallbackAddSet+"|"+maxID), 64)
+	require.LessOrEqual(t, len("\f"+trainingCallbackCancelSet+"|"+maxID), 64)
 	require.LessOrEqual(t, len("\f"+trainingCallbackPrioritizeExercise+"|"+maxID), 64)
 }
 

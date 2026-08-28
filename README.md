@@ -160,9 +160,9 @@ Press **Тренировка 🏋️** to open a single control message. Inline 
 12Р -
 ```
 
-The first form records external weight; the dash records bodyweight. Letter case, decimal comma/dot, and the common hyphen/dash characters are normalized. The temporary input message is deleted after it is processed. Legacy workouts keep the manual **Подход** flow. A structured YAML workout instead shows one next action: the next warm-up set or the repetition buttons for the next working set, followed by nullable RIR buttons. Reaching the planned final working set keeps the exercise open: an additional set can still be recorded, and only the explicit **Завершить упражнение** action advances the workout. The active card can also move any later unfinished exercise before the current one without losing sets or notes.
+The first form records external weight; the dash records bodyweight. Letter case, decimal comma/dot, and the common hyphen/dash characters are normalized. The temporary input message is deleted after it is processed. Every active workout explicitly offers **Разминочный подход** and **Обычный подход**. A warm-up is saved immediately without RIR; an ordinary set is saved only after the required RIR button is selected. After the first ordinary set, sending only a repetition count reuses that exercise's latest actual weight in the current workout. The first ordinary set still requires the full form so the bot never invents a weight. There are no recommendation or predefined-set steps in the workout card. Only the explicit **Завершить упражнение** action advances the workout, and the card can move any later unfinished exercise before the current one without losing sets or notes.
 
-Structured sessions snapshot the active program revision, recommendation, warm-up plan, rep range, RIR target, weight step, and rest settings. Editing or re-importing a program cannot rewrite an already-started session. Each completed set stores its planned and actual weight/reps/RIR separately, plus `completed_at` and `rest_until`. The recommendation can be overridden for the current session with `weight;sets;reps;RIR;rest`, for example `60;3;8-12;2;180s`; the template and original recommendation remain unchanged.
+Sessions snapshot the active program revision and configuration so editing or re-importing a program cannot rewrite an already-started session. Workout entry itself records the explicitly selected set type and the actual weight, repetitions, RIR, completion time, and rest state.
 
 Reopening an exercise preserves its existing sets and note. The active card also shows the same exercise's sets from the most recent earlier completed workout. Active and completed workouts can be deleted after an explicit confirmation; deleting a published workout removes its channel message first. If Telegram refuses to remove the post, a separate confirmation can delete only the Fitlog record and leave the channel untouched. Active state and the control-message ID are stored in PostgreSQL, so a workout can resume after an app restart.
 
@@ -202,7 +202,7 @@ workouts:
         progression: double
 ```
 
-Version 1 supports deterministic double progression. The working weight increases only when the latest completed workout has exactly the planned number of working sets, every set reaches the top of the rep range, and no known RIR is below the target. Missing RIR does not block progression; warm-up sets never participate. Every recommendation persists a machine-readable reason code and a Russian explanation.
+Version 1 plan fields remain validated and stored with the program revision. They are not shown as recommendations or used to predefine the next set in the Telegram workout card; set type and actual values are entered explicitly during the workout.
 
 Legacy programs can still be imported from a UTF-8 TXT file. A blank line separates programs, the first line of each block is the program name, and the remaining lines are ordered exercises:
 

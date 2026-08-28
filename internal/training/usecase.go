@@ -493,56 +493,13 @@ func (u *UseCase) Active(ctx context.Context, ownerID int64) (Session, error) {
 	return u.repo.ActiveSession(ctx, ownerID)
 }
 
-func (u *UseCase) AddSet(ctx context.Context, ownerID int64, raw string) (Session, error) {
-	input, err := ParseSet(raw)
-	if err != nil {
-		return Session{}, err
-	}
-	input.Type = SetTypeWorking
-	input.CompletedAt = time.Now()
-	session, err := u.repo.AddSet(ctx, ownerID, input)
-	if err != nil {
-		return Session{}, err
-	}
-	if err := u.ClearInput(ctx, ownerID); err != nil {
-		return Session{}, err
-	}
-	return session, nil
-}
-
-func (u *UseCase) CompleteWarmup(ctx context.Context, ownerID int64, now time.Time) (Session, error) {
-	session, err := u.repo.ActiveSession(ctx, ownerID)
-	if err != nil {
-		return Session{}, err
-	}
-	exercise := session.CurrentExercise()
-	if exercise == nil || !exercise.Structured() {
-		return Session{}, ErrNotEditable
-	}
-	completed := len(exercise.WarmupSets())
-	if completed >= len(exercise.Warmup) {
-		return Session{}, ErrNotEditable
-	}
-	warmup := exercise.Warmup[completed]
-	updated, err := u.repo.AddSet(ctx, ownerID, SetInput{
-		Type: SetTypeWarmup, WeightKG: cloneFloat(warmup.WeightKG), Reps: warmup.Reps, CompletedAt: now,
-	})
-	if err != nil {
-		return Session{}, err
-	}
-	if err := u.ClearInput(ctx, ownerID); err != nil {
-		return Session{}, err
-	}
-	return updated, nil
-}
-
 func (u *UseCase) BeginWarmup(ctx context.Context, ownerID int64) (Session, error) {
 	session, err := u.repo.ActiveSession(ctx, ownerID)
 	if err != nil {
 		return Session{}, err
 	}
 	exercise := session.CurrentExercise()
-	if exercise == nil || !exercise.Structured() || len(exercise.WarmupSets()) < len(exercise.Warmup) || len(exercise.WorkingSets()) > 0 {
+	if exercise == nil {
 		return Session{}, ErrNotEditable
 	}
 	if err := u.Expect(ctx, ownerID, InputWarmup); err != nil {
@@ -568,7 +525,7 @@ func (u *UseCase) AddWarmup(ctx context.Context, ownerID int64, raw string, now 
 		return Session{}, err
 	}
 	exercise := session.CurrentExercise()
-	if exercise == nil || !exercise.Structured() || len(exercise.WarmupSets()) < len(exercise.Warmup) || len(exercise.WorkingSets()) > 0 {
+	if exercise == nil {
 		return Session{}, ErrNotEditable
 	}
 	input.Type = SetTypeWarmup
@@ -581,6 +538,28 @@ func (u *UseCase) AddWarmup(ctx context.Context, ownerID int64, raw string, now 
 		return Session{}, err
 	}
 	return session, nil
+}
+
+// PrepareWorkingSetInput records the explicitly entered working-set values in
+// UI state and waits for a separate RIR selection before persisting the set.
+// A repetitions-only input reuses the latest working weight from this exercise.
+func (u *UseCase) PrepareWorkingSetInput(ctx context.Context, ownerID int64, raw string) (Session, error) {
+	state, err := u.State(ctx, ownerID)
+	if err != nil {
+		return Session{}, err
+	}
+	if state.Mode != InputSet {
+		return Session{}, ErrNotEditable
+	}
+	raw = strings.TrimSpace(raw)
+	if reps, parseErr := strconv.Atoi(raw); parseErr == nil {
+		return u.PrepareWorkingSet(ctx, ownerID, reps)
+	}
+	input, err := ParseSet(raw)
+	if err != nil {
+		return Session{}, err
+	}
+	return u.PrepareWorkingSetWithWeight(ctx, ownerID, input.Reps, input.WeightKG)
 }
 
 func (u *UseCase) PrepareWorkingSet(ctx context.Context, ownerID int64, reps int) (Session, error) {
@@ -611,7 +590,7 @@ func (u *UseCase) prepareWorkingSet(
 		return Session{}, err
 	}
 	exercise := session.CurrentExercise()
-	if exercise == nil || !exercise.Structured() || len(exercise.WarmupSets()) < len(exercise.Warmup) {
+	if exercise == nil {
 		return Session{}, ErrNotEditable
 	}
 	state, err := u.State(ctx, ownerID)
@@ -619,9 +598,13 @@ func (u *UseCase) prepareWorkingSet(
 		return Session{}, err
 	}
 	state.Mode = InputRIR
-	weight := exercise.NextWorkingWeightKG()
+	weight, hasLastWeight := exercise.LastWorkingWeightKG()
 	if weightProvided {
 		weight = actualWeightKG
+		hasLastWeight = true
+	}
+	if !hasLastWeight {
+		return Session{}, fmt.Errorf("для первого обычного подхода укажи вес полностью: 10Р 60КГ или 10Р -")
 	}
 	state.PendingSet = &PendingSet{Type: SetTypeWorking, WeightKG: cloneFloat(weight), Reps: reps}
 	if err := u.repo.SaveUIState(ctx, state); err != nil {
@@ -636,15 +619,18 @@ func (u *UseCase) CompletePendingSet(
 	rir *float64,
 	now time.Time,
 ) (Session, error) {
-	if rir != nil && (*rir < 0 || *rir > 10) {
-		return Session{}, fmt.Errorf("RIR должен быть от 0 до 10")
-	}
 	state, err := u.State(ctx, ownerID)
 	if err != nil {
 		return Session{}, err
 	}
 	if state.Mode != InputRIR || state.PendingSet == nil {
 		return Session{}, ErrNoPendingSet
+	}
+	if rir == nil {
+		return Session{}, fmt.Errorf("укажи RIR для обычного подхода")
+	}
+	if *rir < 0 || *rir > 10 {
+		return Session{}, fmt.Errorf("RIR должен быть от 0 до 10")
 	}
 	pending := *state.PendingSet
 	session, err := u.repo.AddSet(ctx, ownerID, SetInput{

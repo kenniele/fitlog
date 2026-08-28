@@ -26,6 +26,9 @@ func FormatSet(set WorkoutSet) string {
 
 func FormatSetDetailed(set WorkoutSet) string {
 	formatted := FormatSet(set)
+	if set.Type == SetTypeWarmup {
+		return formatted
+	}
 	rir := set.RIR
 	if set.ActualRIR != nil {
 		rir = set.ActualRIR
@@ -42,9 +45,6 @@ func FormatActiveCard(session Session, previous *PreviousExercise, loc *time.Loc
 	if exercise == nil {
 		return "<b>🏋️ " + html.EscapeString(session.ProgramName) + "</b>\n\nНе удалось найти текущее упражнение."
 	}
-	if exercise.Structured() {
-		return formatStructuredActiveCard(session, *exercise, loc, prompt)
-	}
 	var out strings.Builder
 	fmt.Fprintf(&out, "<b>🏋️ %s</b>\n", html.EscapeString(session.ProgramName))
 	fmt.Fprintf(&out, "Начало: %s\n", session.StartedAt.In(loc).Format("15:04"))
@@ -53,7 +53,7 @@ func FormatActiveCard(session Session, previous *PreviousExercise, loc *time.Loc
 	if previous != nil && len(previous.Sets) > 0 {
 		fmt.Fprintf(&out, "\n<b>Прошлый раз · %s</b>\n", previous.StartedAt.In(loc).Format("02.01.2006"))
 		for _, set := range previous.Sets {
-			fmt.Fprintf(&out, "%d. %s\n", set.Position, FormatSet(set))
+			fmt.Fprintf(&out, "%d. %s\n", set.Position, formatLoggedSet(set))
 		}
 	}
 	if len(exercise.Sets) == 0 {
@@ -61,7 +61,20 @@ func FormatActiveCard(session Session, previous *PreviousExercise, loc *time.Loc
 	} else {
 		out.WriteString("\nТекущие подходы:\n")
 		for _, set := range exercise.Sets {
-			fmt.Fprintf(&out, "%d. %s\n", set.Position, FormatSet(set))
+			fmt.Fprintf(&out, "%d. %s\n", set.Position, formatLoggedSet(set))
+		}
+	}
+	if weight, ok := exercise.LastWorkingWeightKG(); ok {
+		if weight == nil {
+			out.WriteString("\nПоследний вес: собственный вес.\n")
+		} else {
+			fmt.Fprintf(&out, "\nПоследний вес: %s кг.\n", formatDecimal(*weight))
+		}
+	}
+	if session.RestUntil != nil && session.RestUntil.After(time.Now()) {
+		label, seconds := currentRestInstruction(session, *exercise)
+		if seconds > 0 {
+			fmt.Fprintf(&out, "\n%s: <b>%s</b>\n", label, formatSeconds(seconds))
 		}
 	}
 	if exercise.Note != "" {
@@ -73,110 +86,15 @@ func FormatActiveCard(session Session, previous *PreviousExercise, loc *time.Loc
 	return strings.TrimSpace(out.String())
 }
 
-func formatStructuredActiveCard(session Session, exercise SessionExercise, loc *time.Location, prompt string) string {
-	var out strings.Builder
-	totalWorking, completedWorking, additionalWorking := 0, 0, 0
-	for _, item := range session.Exercises {
-		totalWorking += item.Plan.WorkingSets
-		completed := len(item.WorkingSets())
-		completedWorking += min(completed, item.Plan.WorkingSets)
-		if completed > item.Plan.WorkingSets {
-			additionalWorking += completed - item.Plan.WorkingSets
-		}
+func formatLoggedSet(set WorkoutSet) string {
+	switch set.Type {
+	case SetTypeWarmup:
+		return "разминка · " + FormatSetDetailed(set)
+	case SetTypeDrop:
+		return "drop · " + FormatSetDetailed(set)
+	default:
+		return FormatSetDetailed(set)
 	}
-	fmt.Fprintf(&out, "<b>🏋️ %s</b>\n", html.EscapeString(session.ProgramName))
-	fmt.Fprintf(&out, "%s · %d / %d упражнений\n", session.StartedAt.In(loc).Format("02.01.2006"), exercise.Position, len(session.Exercises))
-	fmt.Fprintf(&out, "%d / %d рабочих подходов", completedWorking, totalWorking)
-	if additionalWorking > 0 {
-		fmt.Fprintf(&out, " · +%d дополнительно", additionalWorking)
-	}
-	out.WriteString("\n\n")
-	fmt.Fprintf(&out, "<b>%s</b>\n", html.EscapeString(exercise.Name))
-
-	warmups := exercise.WarmupSets()
-	if len(exercise.Warmup) > 0 || len(warmups) > 0 {
-		out.WriteString("\n<b>Разминка:</b>\n")
-		for index, planned := range exercise.Warmup {
-			switch {
-			case index < len(warmups):
-				if planned.Bar {
-					fmt.Fprintf(&out, "✅ гриф × %d\n", warmups[index].Reps)
-				} else {
-					fmt.Fprintf(&out, "✅ %s\n", formatPlanSet(
-						warmups[index].ActualWeightKG, warmups[index].Reps, warmups[index].Reps,
-					))
-				}
-			case index == len(warmups):
-				fmt.Fprintf(&out, "➡️ %s\n", formatWarmup(planned))
-			default:
-				fmt.Fprintf(&out, "○ %s\n", formatWarmup(planned))
-			}
-		}
-		for index := len(exercise.Warmup); index < len(warmups); index++ {
-			fmt.Fprintf(&out, "✅ дополнительно · %s\n", FormatSetDetailed(warmups[index]))
-		}
-	}
-
-	working := exercise.WorkingSets()
-	nextWeight := exercise.NextWorkingWeightKG()
-	out.WriteString("\n<b>Рабочие:</b>\n")
-	for index := 0; index < exercise.Plan.WorkingSets; index++ {
-		switch {
-		case index < len(working):
-			fmt.Fprintf(&out, "✅ %s\n", FormatSetDetailed(working[index]))
-		case index == len(working) && len(warmups) >= len(exercise.Warmup):
-			fmt.Fprintf(&out, "➡️ %s\n", formatPlanSet(nextWeight, exercise.Plan.MinReps, exercise.Plan.MaxReps))
-		default:
-			fmt.Fprintf(&out, "○ %s\n", formatPlanSet(nextWeight, exercise.Plan.MinReps, exercise.Plan.MaxReps))
-		}
-	}
-	for index := exercise.Plan.WorkingSets; index < len(working); index++ {
-		fmt.Fprintf(&out, "✅ дополнительно · %s\n", FormatSetDetailed(working[index]))
-	}
-	if len(working) >= exercise.Plan.WorkingSets {
-		out.WriteString("\n✅ План выполнен. Можно добавить подход или завершить упражнение.")
-	}
-	fmt.Fprintf(&out, "\nЦель: RIR %s · отдых между подходами: %s", formatDecimal(exercise.Plan.TargetRIR), formatSeconds(exercise.Plan.RestSeconds))
-	if exercise.Overridden {
-		out.WriteString("\n✏️ Рекомендация изменена для этой тренировки.")
-	}
-	if len(working) > 0 && nextWeight != nil {
-		fmt.Fprintf(&out, "\n\n<b>Почему:</b>\nПовторяем последний фактический вес этой тренировки: %s кг.", formatDecimal(*nextWeight))
-	} else if exercise.Recommendation.Reason != "" {
-		fmt.Fprintf(&out, "\n\n<b>Почему:</b>\n%s", html.EscapeString(exercise.Recommendation.Reason))
-	}
-	if session.RestUntil != nil && session.RestUntil.After(time.Now()) {
-		label, seconds := currentRestInstruction(session, exercise)
-		if seconds > 0 {
-			fmt.Fprintf(&out, "\n\n%s: <b>%s</b>", label, formatSeconds(seconds))
-		}
-	}
-	if exercise.Note != "" {
-		fmt.Fprintf(&out, "\n\n📝 %s", html.EscapeString(exercise.Note))
-	}
-	if prompt != "" {
-		fmt.Fprintf(&out, "\n\n<b>%s</b>", html.EscapeString(prompt))
-	}
-	return strings.TrimSpace(out.String())
-}
-
-func formatWarmup(set WarmupSet) string {
-	if set.Bar {
-		return fmt.Sprintf("гриф × %d", set.Reps)
-	}
-	return formatPlanSet(set.WeightKG, set.Reps, set.Reps)
-}
-
-func formatPlanSet(weight *float64, minReps, maxReps int) string {
-	weightText := "вес вручную"
-	if weight != nil {
-		weightText = formatDecimal(*weight) + " кг"
-	}
-	reps := strconv.Itoa(minReps)
-	if minReps != maxReps {
-		reps += "–" + strconv.Itoa(maxReps)
-	}
-	return weightText + " × " + reps
 }
 
 func formatSeconds(seconds int) string {
@@ -250,27 +168,14 @@ func FormatFinished(session Session, loc *time.Location) string {
 			skipped++
 		}
 	}
-	if warmupSets > 0 || dropSets > 0 || sessionHasStructuredExercises(session) {
-		fmt.Fprintf(&out, "\nУпражнений: %d · Рабочих подходов: %d · Разминочных: %d", len(session.Exercises), workingSets, warmupSets)
-		if dropSets > 0 {
-			fmt.Fprintf(&out, " · Drop: %d", dropSets)
-		}
-	} else {
-		fmt.Fprintf(&out, "\nУпражнений: %d · Подходов: %d", len(session.Exercises), workingSets)
+	fmt.Fprintf(&out, "\nУпражнений: %d · Обычных подходов: %d · Разминочных: %d", len(session.Exercises), workingSets, warmupSets)
+	if dropSets > 0 {
+		fmt.Fprintf(&out, " · Drop: %d", dropSets)
 	}
 	if skipped > 0 {
 		fmt.Fprintf(&out, " · Пропусков: %d", skipped)
 	}
 	return strings.TrimSpace(out.String())
-}
-
-func sessionHasStructuredExercises(session Session) bool {
-	for _, exercise := range session.Exercises {
-		if exercise.Structured() {
-			return true
-		}
-	}
-	return false
 }
 
 func FormatSessionDuration(session Session) string {

@@ -329,33 +329,40 @@ func TestProgramExerciseCanBeReplacedWithNewAndHistory(t *testing.T) {
 	require.True(t, repo.replacedHistory)
 }
 
-func TestPlannedWorkingSetWaitsForExplicitFinishAndAllowsAdditionalSet(t *testing.T) {
+func TestOrdinarySetsRequireRIRAndExerciseWaitsForExplicitFinish(t *testing.T) {
 	weight := 60.0
+	rir := 2.0
 	repo := &stateRepository{
-		state: UIState{OwnerID: 42},
+		state: UIState{OwnerID: 42, Mode: InputSet},
 		activeSession: Session{ID: 1, OwnerID: 42, Status: "active", CurrentPosition: 1, Exercises: []SessionExercise{{
 			ID: 2, Position: 1, Name: "Жим",
-			Plan: Recommendation{WeightKG: &weight, MinReps: 8, MaxReps: 12, WorkingSets: 1, TargetRIR: 2, RestSeconds: 180},
 		}}},
 	}
 	usecase := NewUseCase(repo)
 
-	_, err := usecase.PrepareWorkingSet(context.Background(), 42, 12)
+	_, err := usecase.PrepareWorkingSetInput(context.Background(), 42, "12Р 60КГ")
 	require.NoError(t, err)
 	require.Equal(t, InputRIR, repo.state.Mode)
 	require.Equal(t, 12, repo.state.PendingSet.Reps)
 
 	session, err := usecase.CompletePendingSet(context.Background(), 42, nil, time.Now())
+	require.ErrorContains(t, err, "укажи RIR")
+	require.Empty(t, session)
+	require.Empty(t, repo.activeSession.CurrentExercise().Sets)
+
+	session, err = usecase.CompletePendingSet(context.Background(), 42, &rir, time.Now())
 	require.NoError(t, err)
 	require.False(t, repo.finishCalled)
 	require.True(t, session.Active())
-	require.Nil(t, repo.lastSet.RIR)
+	require.InDelta(t, 2, *repo.lastSet.RIR, 0.001)
 	require.Equal(t, SetTypeWorking, repo.lastSet.Type)
 	require.Equal(t, InputNone, repo.state.Mode)
 
-	_, err = usecase.PrepareWorkingSet(context.Background(), 42, 10)
-	require.NoError(t, err, "the completed plan must still accept an additional set")
-	session, err = usecase.CompletePendingSet(context.Background(), 42, nil, time.Now())
+	repo.state.Mode = InputSet
+	_, err = usecase.PrepareWorkingSetInput(context.Background(), 42, "10")
+	require.NoError(t, err, "the latest working weight must be reusable for another set")
+	require.InDelta(t, weight, *repo.state.PendingSet.WeightKG, 0.001)
+	session, err = usecase.CompletePendingSet(context.Background(), 42, &rir, time.Now())
 	require.NoError(t, err)
 	require.Len(t, session.CurrentExercise().WorkingSets(), 2)
 	require.False(t, repo.finishCalled)
@@ -390,17 +397,15 @@ func TestPrioritizeExerciseMovesItBeforeCurrentAndClearsPendingInput(t *testing.
 	})
 }
 
-func TestAdditionalWarmupIsStoredAsWarmupBeforeWorkingSets(t *testing.T) {
-	plannedWeight := 20.0
-	extraWeight := 40.0
+func TestWarmupButtonExplicitlyStoresWarmupWithoutRIR(t *testing.T) {
+	workingWeight := 40.0
+	workingReps := 8
 	repo := &stateRepository{
-		state: UIState{OwnerID: 42},
+		state: UIState{OwnerID: 42, Mode: InputSet},
 		activeSession: Session{ID: 1, OwnerID: 42, Status: "active", CurrentPosition: 1, Exercises: []SessionExercise{{
 			ID: 2, Position: 1, Name: "Жим",
-			Warmup: []WarmupSet{{WeightKG: &plannedWeight, Reps: 10}},
-			Plan:   Recommendation{WeightKG: &extraWeight, MinReps: 8, MaxReps: 12, WorkingSets: 3},
 			Sets: []WorkoutSet{{
-				ID: 3, Position: 1, Type: SetTypeWarmup, ActualWeightKG: &plannedWeight, Reps: 10,
+				ID: 3, Position: 1, Type: SetTypeWorking, ActualWeightKG: &workingWeight, ActualReps: &workingReps, Reps: workingReps,
 			}},
 		}}},
 	}
@@ -416,31 +421,56 @@ func TestAdditionalWarmupIsStoredAsWarmupBeforeWorkingSets(t *testing.T) {
 	require.Equal(t, SetTypeWarmup, repo.lastSet.Type)
 	require.Equal(t, 5, repo.lastSet.Reps)
 	require.InDelta(t, 40, *repo.lastSet.WeightKG, 0.001)
+	require.Nil(t, repo.lastSet.RIR)
 	require.Equal(t, completedAt, repo.lastSet.CompletedAt)
-	require.Len(t, session.CurrentExercise().WarmupSets(), 2)
+	require.Len(t, session.CurrentExercise().WarmupSets(), 1)
 	require.Equal(t, InputNone, repo.state.Mode)
 }
 
 func TestWorkingSetUsesLatestActualWeightFromCurrentWorkout(t *testing.T) {
-	recommendedWeight := 35.0
 	actualWeight := 40.8
 	repo := &stateRepository{
-		state: UIState{OwnerID: 42},
+		state: UIState{OwnerID: 42, Mode: InputSet},
 		activeSession: Session{ID: 1, OwnerID: 42, Status: "active", CurrentPosition: 1, Exercises: []SessionExercise{{
 			ID: 2, Position: 1, Name: "Жим",
-			Plan: Recommendation{WeightKG: &recommendedWeight, MinReps: 8, MaxReps: 12, WorkingSets: 3},
 			Sets: []WorkoutSet{{
 				ID: 3, Position: 1, Type: SetTypeWorking, ActualWeightKG: &actualWeight, Reps: 12,
 			}},
 		}}},
 	}
 
-	_, err := NewUseCase(repo).PrepareWorkingSet(context.Background(), 42, 10)
+	_, err := NewUseCase(repo).PrepareWorkingSetInput(context.Background(), 42, "10")
 
 	require.NoError(t, err)
 	require.Equal(t, InputRIR, repo.state.Mode)
 	require.NotNil(t, repo.state.PendingSet)
 	require.InDelta(t, 40.8, *repo.state.PendingSet.WeightKG, 0.001)
+}
+
+func TestFirstOrdinarySetRequiresExplicitWeight(t *testing.T) {
+	repo := &stateRepository{
+		state: UIState{OwnerID: 42, Mode: InputSet},
+		activeSession: Session{ID: 1, OwnerID: 42, Status: "active", CurrentPosition: 1, Exercises: []SessionExercise{{
+			ID: 2, Position: 1, Name: "Подтягивания",
+		}}},
+	}
+	usecase := NewUseCase(repo)
+
+	_, err := usecase.PrepareWorkingSetInput(context.Background(), 42, "10")
+	require.ErrorContains(t, err, "для первого обычного подхода укажи вес полностью")
+
+	_, err = usecase.PrepareWorkingSetInput(context.Background(), 42, "10Р -")
+	require.NoError(t, err)
+	require.Equal(t, InputRIR, repo.state.Mode)
+	require.Nil(t, repo.state.PendingSet.WeightKG)
+
+	rir := 3.0
+	_, err = usecase.CompletePendingSet(context.Background(), 42, &rir, time.Now())
+	require.NoError(t, err)
+	repo.state.Mode = InputSet
+	_, err = usecase.PrepareWorkingSetInput(context.Background(), 42, "8")
+	require.NoError(t, err)
+	require.Nil(t, repo.state.PendingSet.WeightKG)
 }
 
 func TestOverrideDoesNotModifyOriginalRecommendation(t *testing.T) {
