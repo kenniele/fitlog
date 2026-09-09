@@ -44,6 +44,7 @@ type Deps struct {
 	States            StateIssuer
 	FatSecretAuth     FatSecretAuthorizer
 	Training          *training.UseCase
+	ExportTraining    func(context.Context, int64, string) ([]byte, error)
 	WorkoutChannelIDs []int64
 	Location          *time.Location
 	Logger            *slog.Logger

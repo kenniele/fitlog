@@ -64,6 +64,7 @@ func (h *apiHandler) routes() http.Handler {
 		}
 
 		protected.Get("/workout-sessions/export.csv", h.exportSessionsCSV)
+		protected.Get("/workout-sessions/export.json", h.exportSessionsJSON)
 		h.registerResource(protected, "workout-sessions")
 		h.registerResource(protected, "workout-plans")
 		h.registerResource(protected, "exercises")
@@ -349,23 +350,46 @@ func (h *apiHandler) deleteResource(resource string) http.HandlerFunc {
 }
 
 func (h *apiHandler) exportSessionsCSV(w http.ResponseWriter, r *http.Request) {
-	dateRange, err := ParseDateRange(r, h.requestLocation(r), h.now())
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
+	h.exportSessions(w, r, "csv")
+}
+
+func (h *apiHandler) exportSessionsJSON(w http.ResponseWriter, r *http.Request) {
+	h.exportSessions(w, r, "json")
+}
+
+func (h *apiHandler) exportSessions(w http.ResponseWriter, r *http.Request, format string) {
 	filters, err := ParsePagination(r, h.requestLocation(r))
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	content, err := h.service.ExportSessionsCSV(r.Context(), dateRange, filters)
+	switch strings.TrimSpace(r.URL.Query().Get("scope")) {
+	case "", "range":
+		dateRange, rangeErr := ParseDateRange(r, h.requestLocation(r), h.now())
+		if rangeErr != nil {
+			writeServiceError(w, rangeErr)
+			return
+		}
+		filters.From, filters.To = &dateRange.From, &dateRange.To
+	case "all":
+		filters.From, filters.To = nil, nil
+	default:
+		writeServiceError(w, &ValidationError{
+			Message: "invalid export scope", Fields: map[string]string{"scope": "use range or all"},
+		})
+		return
+	}
+	content, err := h.service.ExportSessions(r.Context(), filters, format)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="fitlog-workout-sessions.csv"`)
+	contentType := "text/csv; charset=utf-8"
+	if format == "json" {
+		contentType = "application/json; charset=utf-8"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", `attachment; filename="fitlog-workout-sessions.`+format+`"`)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
 }
@@ -436,7 +460,11 @@ func (h *apiHandler) sources(w http.ResponseWriter, r *http.Request) {
 func (h *apiHandler) exportAll(w http.ResponseWriter, r *http.Request) {
 	exportType := strings.TrimSpace(r.URL.Query().Get("type"))
 	if exportType == "training" || exportType == "sessions" {
-		h.exportSessionsCSV(w, r)
+		format := strings.TrimSpace(r.URL.Query().Get("format"))
+		if format == "" {
+			format = "csv"
+		}
+		h.exportSessions(w, r, format)
 		return
 	}
 	if exportType != "" && exportType != "all" {

@@ -4,8 +4,8 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { usePathname, useRouter } from "next/navigation";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { CalendarDays, Download, Eye, List, Pencil, Plus, Trash2 } from "lucide-react";
-import { apiFetch, downloadFromAPI, fetchAllList, listItems, type ListResponse } from "@/lib/api";
+import { CalendarDays, Eye, List, Pencil, Plus, Trash2 } from "lucide-react";
+import { apiFetch, fetchAllList, listItems, type ListResponse } from "@/lib/api";
 import type { AnalyticsResponse, Exercise, Settings, WorkoutPlan, WorkoutSession } from "@/lib/types";
 import { parseFirstDayOfWeek } from "@/lib/week";
 import { useQuickAction, useRangeSearch } from "@/lib/hooks";
@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { comparisonSummaryMetrics, summaryToMetrics } from "@/lib/metrics";
 import { PAGE_SIZE, Pagination } from "@/components/ui/pagination";
 import { SessionCalendar, calendarSessionQuery } from "@/components/training/session-calendar";
+import { TrainingExport } from "@/components/training/export-dialog";
 
 function positivePage(value: string | null) {
   const parsed = Number(value);
@@ -94,8 +95,6 @@ function TrainingContent() {
   const filters = `${baseFilters}&page=${page}&page_size=${PAGE_SIZE}`;
   const exportParams = new URLSearchParams(baseFilters);
   if (view === "calendar") exportParams.set("date_basis", "calendar");
-  exportParams.set("page", "1");
-  exportParams.set("page_size", "100");
   const exportFilters = exportParams.toString();
   const sessions = useQuery({
     queryKey: ["workout-sessions", filters],
@@ -126,9 +125,6 @@ function TrainingContent() {
       await client.invalidateQueries({ queryKey: ["analytics-training"] });
     },
   });
-  const exportData = useMutation({
-    mutationFn: () => downloadFromAPI(`/api/v1/export?type=training&${exportFilters}`, `fitlog-training-${new Date().toISOString().slice(0, 10)}.csv`),
-  });
 
   const columns = useMemo<ColumnDef<WorkoutSession>[]>(() => [
     { accessorKey: "date", header: "Дата", cell: ({ row }) => <span>{formatDate(row.original.date ?? row.original.started_at)}</span> },
@@ -147,8 +143,7 @@ function TrainingContent() {
 
   return (
     <>
-      <PageHeader eyebrow="Training" title="Тренировки и прогрессия" description="Сессии, рабочий объём и сила внутри конкретных упражнений." actions={<><Button onClick={() => exportData.mutate()} loading={exportData.isPending}><Download className="size-4" />CSV</Button><Button variant="primary" onClick={openNew}><Plus className="size-4" />Тренировка</Button></>} />
-      <InlineError error={exportData.error} />
+      <PageHeader eyebrow="Training" title="Тренировки и прогрессия" description="Сессии, рабочий объём и сила внутри конкретных упражнений." actions={<><TrainingExport filters={exportFilters} /><Button variant="primary" onClick={openNew}><Plus className="size-4" />Тренировка</Button></>} />
       <MetricGrid metrics={analytics.data?.comparison ? comparisonSummaryMetrics(analytics.data.summary, analytics.data.comparison) : summaryToMetrics(analytics.data?.summary)} />
       <TrainingStreakCards streak={analytics.data?.streak} />
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">

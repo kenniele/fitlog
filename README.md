@@ -153,6 +153,13 @@ The provider modules expose the same application pipeline: `Fetch → Transform 
 
 ## Strength workouts
 
+Training history can be downloaded as CSV or JSON. In the Control Center,
+open **Тренировки → Экспорт** and choose the current date range or all time;
+the current training filters apply across every page. In Telegram, open
+**Тренировка 🏋️ → Экспорт тренировок → CSV / JSON** to receive all your sessions
+as a document in your private chat. Both use the same export, including warm-up
+and drop sets, bodyweight, RIR, and notes; JSON also includes planned values.
+
 Press **Тренировка 🏋️** to open a single control message. Inline buttons edit that message in place instead of sending a new card after every action. When the card asks for a set, send one of these forms:
 
 ```text

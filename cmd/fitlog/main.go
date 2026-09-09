@@ -181,14 +181,26 @@ func run(parent context.Context) error {
 		return fmt.Errorf("provider sync: %w", err)
 	}
 	deps := bot.Deps{
-		Whoop:             whoopReports,
-		FatSecret:         fsReports,
-		Articles:          articleReports,
-		PublicBaseURL:     publicBaseURL,
-		OAuthConfig:       oauthCfg,
-		States:            states,
-		FatSecretAuth:     fsOAuth,
-		Training:          trainingReports,
+		Whoop:         whoopReports,
+		FatSecret:     fsReports,
+		Articles:      articleReports,
+		PublicBaseURL: publicBaseURL,
+		OAuthConfig:   oauthCfg,
+		States:        states,
+		FatSecretAuth: fsOAuth,
+		Training:      trainingReports,
+		ExportTraining: func(ctx context.Context, userID int64, format string) ([]byte, error) {
+			settings, err := controlCenterRepo.Settings(ctx, userID, loc.String())
+			if err != nil {
+				return nil, err
+			}
+			exportLocation, err := time.LoadLocation(settings.Timezone)
+			if err != nil {
+				return nil, err
+			}
+			service := controlcenter.NewService(controlCenterRepo, userID, exportLocation)
+			return service.ExportSessions(ctx, controlcenter.Pagination{}, format)
+		},
 		WorkoutChannelIDs: cfg.WorkoutChannels(),
 		Location:          loc,
 		Logger:            logger,

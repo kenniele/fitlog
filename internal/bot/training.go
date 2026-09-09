@@ -46,6 +46,7 @@ const (
 	trainingCallbackImportExisting          = "training_import_existing"
 	trainingCallbackImportNew               = "training_import_new"
 	trainingCallbackHistory                 = "training_history"
+	trainingCallbackExport                  = "training_export"
 	trainingCallbackHistorySession          = "training_history_session"
 	trainingCallbackPublish                 = "training_publish"
 	trainingCallbackPublishChannel          = "tr_publish_channel"
@@ -91,6 +92,7 @@ func (b *Bot) registerTrainingHandlers() {
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackImportExisting}, b.handleTrainingImportExisting, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackImportNew}, b.handleTrainingImportNew, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackHistory}, b.handleTrainingHistory, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackExport}, b.handleTrainingExport, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackPublish}, b.handleTrainingPublish, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackHistorySession}, b.handleTrainingHistorySession, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackPublishChannel}, b.handleTrainingPublishChannel, currentCard)
@@ -888,7 +890,10 @@ func (b *Bot) handleTrainingHistory(c tele.Context) error {
 		}
 		rows = append(rows, navigation)
 	}
-	rows = append(rows, markup.Row(markup.Data("‹ Назад", trainingCallbackHome)))
+	rows = append(rows,
+		markup.Row(markup.Data("📤 Экспорт тренировок", trainingCallbackExport)),
+		markup.Row(markup.Data("‹ Назад", trainingCallbackHome)),
+	)
 	markup.Inline(rows...)
 	return b.editTrainingCard(ctx, c, ownerID, text.String(), markup)
 }
@@ -1192,6 +1197,7 @@ func (b *Bot) showTrainingHome(ctx context.Context, c tele.Context, ownerID int6
 		),
 		markup.Row(markup.Data("📎 Импорт", trainingCallbackImport)),
 		markup.Row(markup.Data("🕘 История", trainingCallbackHistory)),
+		markup.Row(markup.Data("📤 Экспорт тренировок", trainingCallbackExport)),
 	)
 	markup.Inline(rows...)
 	return b.editTrainingCard(ctx, c, ownerID, text.String(), markup)

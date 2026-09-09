@@ -315,6 +315,10 @@ func (r *PostgresRepository) Sources(ctx context.Context, ownerID int64) ([]Sour
 }
 
 func (r *PostgresRepository) ExportSessionsCSV(ctx context.Context, ownerID int64, dateRange DateRange, filters Pagination, loc *time.Location) ([]byte, error) {
+	var from, to *time.Time
+	if !dateRange.From.IsZero() && !dateRange.To.IsZero() {
+		from, to = &dateRange.From, &dateRange.To
+	}
 	planID, err := optionalFilterID(filters.Filters["plan_id"], "plan_id")
 	if err != nil {
 		return nil, err
@@ -339,10 +343,10 @@ func (r *PostgresRepository) ExportSessionsCSV(ctx context.Context, ownerID int6
 		LEFT JOIN training_session_exercises exercise ON exercise.session_id=session.id
 		LEFT JOIN training_sets set ON set.session_exercise_id=exercise.id
 		WHERE session.owner_id=$1
-		  AND (CASE WHEN $10::text='calendar'
+		  AND ($3::date IS NULL OR (CASE WHEN $10::text='calendar'
 		       THEN COALESCE((session.scheduled_at AT TIME ZONE $2)::date,(session.started_at AT TIME ZONE $2)::date)
 		       ELSE COALESCE((session.started_at AT TIME ZONE $2)::date,(session.scheduled_at AT TIME ZONE $2)::date)
-		       END) BETWEEN $3::date AND $4::date
+		       END) BETWEEN $3::date AND $4::date)
 		  AND ($5::text='' OR session.status=$5)
 		  AND ($6::text='' OR session.program_name ILIKE '%' || $6 || '%' OR EXISTS (
 		      SELECT 1 FROM training_session_exercises searched
@@ -355,7 +359,7 @@ func (r *PostgresRepository) ExportSessionsCSV(ctx context.Context, ownerID int6
 		ORDER BY CASE WHEN $10::text='calendar' THEN COALESCE(session.scheduled_at,session.started_at)
 		         ELSE COALESCE(session.started_at,session.scheduled_at) END,
 		         session.id, exercise.position, set.position`,
-		ownerID, loc.String(), dateRange.From, dateRange.To, filters.Filters["status"],
+		ownerID, loc.String(), from, to, filters.Filters["status"],
 		strings.TrimSpace(filters.Search), planID, templateID, exerciseID, filters.Filters["date_basis"])
 	if err != nil {
 		return nil, fmt.Errorf("export sessions: %w", err)
@@ -375,9 +379,11 @@ func (r *PostgresRepository) ExportSessionsCSV(ctx context.Context, ownerID int6
 			return nil, fmt.Errorf("scan session export: %w", err)
 		}
 		_ = writer.Write([]string{
-			strconv.FormatInt(sessionID, 10), programName, status, formatTimePtr(scheduled, loc), formatTimePtr(started, loc), formatTimePtr(finished, loc),
-			formatIntPtr(exercisePosition), stringPtr(exerciseName), stringPtr(exerciseNotes), formatIntPtr(setPosition), stringPtr(setType),
-			formatFloatPtr(weight), formatIntPtr(reps), formatFloatPtr(rir), formatIntPtr(rest), formatTimePtr(completed, loc), stringPtr(setNotes),
+			strconv.FormatInt(sessionID, 10), csvText(programName), status,
+			formatTimePtr(scheduled, loc), formatTimePtr(started, loc), formatTimePtr(finished, loc),
+			formatIntPtr(exercisePosition), csvText(stringPtr(exerciseName)), csvText(stringPtr(exerciseNotes)),
+			formatIntPtr(setPosition), stringPtr(setType), formatFloatPtr(weight), formatIntPtr(reps),
+			formatFloatPtr(rir), formatIntPtr(rest), formatTimePtr(completed, loc), csvText(stringPtr(setNotes)),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -385,6 +391,16 @@ func (r *PostgresRepository) ExportSessionsCSV(ctx context.Context, ownerID int6
 	}
 	writer.Flush()
 	return output.Bytes(), writer.Error()
+}
+
+// csvText keeps user-written names and notes from becoming spreadsheet formulas.
+func csvText(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if strings.HasPrefix(trimmed, "=") || strings.HasPrefix(trimmed, "+") ||
+		strings.HasPrefix(trimmed, "-") || strings.HasPrefix(trimmed, "@") {
+		return "'" + value
+	}
+	return value
 }
 
 func (r *PostgresRepository) ExportAll(ctx context.Context, ownerID int64, loc *time.Location) (json.RawMessage, error) {
