@@ -31,13 +31,17 @@ The optional `/mcp` Streamable HTTP endpoint exposes 12 read tools and four
 opt-in write tools over the same owner-scoped journal: context, overview,
 analytics, workouts, plans, exercises, nutrition, sleep, recovery and body data.
 It uses the official Go MCP SDK and OAuth authorization-code flow with PKCE,
-a pre-registered client, persisted token grants and separate read/write scopes.
+a pre-registered web client or automatic native-client registration (DCR),
+persisted token grants and separate read/write scopes.
 Telegram commands, CLI and the web API remain available.
 
-MCP is disabled by default. Enabling it requires HTTPS, migration 00013,
+MCP is disabled by default. Enabling it requires HTTPS, migrations 00013–00014,
 separate client/login secrets and an exact ChatGPT callback URI. Follow the
 [setup and tool reference](docs/mcp.md), including the Caddy routing changes
 and the distinction between daily nutrition totals and individual meals.
+In the desktop MCP form, select Streamable HTTP and enter the URL; leave bearer
+and header fields empty, then authenticate on FitLog. Local callbacks register
+automatically and do not belong in the web callback allowlist.
 
 ## FitLog Control Center
 

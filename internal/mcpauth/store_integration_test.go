@@ -86,6 +86,12 @@ func TestPostgresOAuthAtomicExchange(t *testing.T) {
 		t.Fatal("expired access token accepted")
 	}
 }
+
+func TestPostgresNativeClientIsolation(t *testing.T) {
+	s, _ := integrationServer(t)
+	exerciseClientIsolation(t, s)
+}
+
 func TestPostgresMCPJournal(t *testing.T) {
 	s, pool := integrationServer(t)
 	ctx := t.Context()

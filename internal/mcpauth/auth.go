@@ -1,4 +1,4 @@
-// Package mcpauth implements single-owner OAuth for a pre-registered MCP client.
+// Package mcpauth implements single-owner OAuth for web and native MCP clients.
 // It is intentionally separate from provider OAuth tokens and dashboard cookies.
 package mcpauth
 
@@ -29,6 +29,7 @@ const (
 	WriteScope  = "fitlog:write"
 	loginCookie = "__Host-fitlog-mcp-csrf"
 	maxBody     = 1 << 20
+	consentCSP  = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
 )
 
 type Config struct {
@@ -50,7 +51,7 @@ type Server struct {
 
 type scopeKey struct{}
 
-// NewServer requires HTTPS and an exact redirect allowlist. The two secrets
+// NewServer requires HTTPS and an exact web redirect allowlist. The two secrets
 // are separate: LoginToken is entered only on FitLog, ClientSecret in ChatGPT.
 func NewServer(cfg Config, pool *pgxpool.Pool, logger *slog.Logger) (*Server, error) {
 	return newServer(cfg, &postgresStore{pool: pool}, logger)
@@ -107,6 +108,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /oauth/mcp/authorize", s.authorize)
 	mux.HandleFunc("POST /oauth/mcp/token", s.token)
 	mux.HandleFunc("POST /oauth/mcp/revoke", s.revoke)
+	mux.HandleFunc("POST /oauth/mcp/register", s.register)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		headers(w)
 		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
@@ -120,7 +122,7 @@ func headers(w http.ResponseWriter) {
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	w.Header().Set("Content-Security-Policy", consentCSP+"; form-action 'self'")
 	w.Header().Set("X-Frame-Options", "DENY")
 }
 func (s *Server) resourceMetadata(w http.ResponseWriter, _ *http.Request) {
@@ -129,8 +131,9 @@ func (s *Server) resourceMetadata(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) serverMetadata(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, map[string]any{"issuer": s.cfg.BaseURL, "authorization_endpoint": s.cfg.BaseURL + "/oauth/mcp/authorize",
 		"token_endpoint": s.cfg.BaseURL + "/oauth/mcp/token", "revocation_endpoint": s.cfg.BaseURL + "/oauth/mcp/revoke",
+		"registration_endpoint":    s.cfg.BaseURL + "/oauth/mcp/register",
 		"response_types_supported": []string{"code"}, "grant_types_supported": []string{"authorization_code", "refresh_token"},
-		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post"},
+		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post", "none"},
 		"code_challenge_methods_supported":      []string{"S256"}, "scopes_supported": s.scopes(), "authorization_response_iss_parameter_supported": true})
 }
 
@@ -177,14 +180,18 @@ func (s *Server) challenge(w http.ResponseWriter) {
 
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	// No redirects occur until the client and exact callback have been verified.
-	if q.Get("client_id") != s.cfg.ClientID || !slices.Contains(s.cfg.RedirectURIs, q.Get("redirect_uri")) {
+	// No redirects occur until the client and its registered callback are verified.
+	client, valid := s.resolveClient(q.Get("client_id"))
+	if !valid || !client.allowsRedirect(q.Get("redirect_uri")) {
 		oauthError(w, 400, "invalid_request")
 		return
 	}
 	scope := q.Get("scope")
 	if scope == "" {
 		scope = strings.Join(s.scopes(), " ")
+		if !client.refresh {
+			scope = strings.ReplaceAll(scope, " offline_access", "")
+		}
 	}
 	for _, values := range q {
 		if len(values) != 1 {
@@ -197,7 +204,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, v := range strings.Fields(scope) {
-		if !slices.Contains(s.scopes(), v) {
+		if !slices.Contains(s.scopes(), v) || (v == "offline_access" && !client.refresh) {
 			oauthError(w, 400, "invalid_scope")
 			return
 		}
@@ -207,10 +214,14 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet {
+		// Chromium also applies form-action to the POST's redirect chain.
+		// The form action is fixed to FitLog, and the callback is validated above.
+		// Keep scripts/frames disabled, but allow navigation back to the client.
+		w.Header().Set("Content-Security-Policy", consentCSP)
 		csrf := randomToken()
 		http.SetCookie(w, &http.Cookie{Name: loginCookie, Value: csrf, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, MaxAge: 600})
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = consentPage.Execute(w, struct{ Action, CSRF, Client, Scope, Redirect string }{r.URL.RequestURI(), s.consentCSRF(csrf, q), s.cfg.ClientID, scope, q.Get("redirect_uri")})
+		_ = consentPage.Execute(w, struct{ Action, CSRF, Client, Scope, Redirect string }{r.URL.RequestURI(), s.consentCSRF(csrf, q), client.name, scope, q.Get("redirect_uri")})
 		return
 	}
 	if r.Header.Get("Origin") != s.cfg.BaseURL {
@@ -239,7 +250,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		code := randomToken()
-		err := s.store.SaveCode(r.Context(), grant{Binding: s.binding, Scope: scope, RedirectURI: q.Get("redirect_uri"), Challenge: q.Get("code_challenge"), CodeHash: digest(code), CodeExpiresAt: time.Now().Add(5 * time.Minute)})
+		err := s.store.SaveCode(r.Context(), grant{Binding: s.binding, ClientHash: client.hash, Scope: scope, RedirectURI: q.Get("redirect_uri"), Challenge: q.Get("code_challenge"), CodeHash: digest(code), CodeExpiresAt: time.Now().Add(5 * time.Minute)})
 		if err != nil {
 			s.internalError(w, r, err)
 			return
@@ -247,50 +258,71 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 		response.Set("code", code)
 	}
 	redirect.RawQuery = response.Encode()
-	// The redirect is matched exactly against the configured HTTPS allowlist above.
+	// The redirect is verified against the client's registered callbacks above.
 	http.Redirect(w, r, redirect.String(), http.StatusSeeOther) //nolint:gosec // G710: only the verified callback receives OAuth code/state.
 }
 
-func (s *Server) authenticateClient(w http.ResponseWriter, r *http.Request) bool {
+func (s *Server) authenticateClient(w http.ResponseWriter, r *http.Request) (oauthClient, bool) {
 	if err := r.ParseForm(); err != nil {
 		oauthError(w, 400, "invalid_request")
-		return false
+		return oauthClient{}, false
 	}
 	for _, values := range r.PostForm {
 		if len(values) != 1 {
 			oauthError(w, 400, "invalid_request")
-			return false
+			return oauthClient{}, false
 		}
+	}
+	if len(r.Header.Values("Authorization")) > 1 {
+		oauthError(w, 400, "invalid_request")
+		return oauthClient{}, false
 	}
 	id, secret, ok := r.BasicAuth()
 	if ok {
 		if r.PostForm.Has("client_secret") {
 			oauthError(w, 400, "invalid_request")
-			return false
+			return oauthClient{}, false
 		}
 		var err error
 		id, err = url.QueryUnescape(id)
 		if err != nil {
 			oauthError(w, 401, "invalid_client")
-			return false
+			return oauthClient{}, false
 		}
 		secret, err = url.QueryUnescape(secret)
 		if err != nil {
 			oauthError(w, 401, "invalid_client")
-			return false
+			return oauthClient{}, false
+		}
+		if r.PostForm.Has("client_id") && r.PostForm.Get("client_id") != id {
+			oauthError(w, 400, "invalid_request")
+			return oauthClient{}, false
 		}
 	} else {
+		if len(r.Header.Values("Authorization")) != 0 {
+			oauthError(w, 401, "invalid_client")
+			return oauthClient{}, false
+		}
 		id, secret = r.PostForm.Get("client_id"), r.PostForm.Get("client_secret")
 	}
-	if id != s.cfg.ClientID || !equal(secret, s.cfg.ClientSecret) {
+	client, valid := s.resolveClient(id)
+	if valid && client.public {
+		if ok || r.PostForm.Has("client_secret") {
+			oauthError(w, 401, "invalid_client")
+			return oauthClient{}, false
+		}
+		return client, true
+	}
+	if !valid || !equal(secret, s.cfg.ClientSecret) {
 		w.Header().Set("WWW-Authenticate", `Basic realm="FitLog MCP"`)
 		oauthError(w, 401, "invalid_client")
-		return false
+		return oauthClient{}, false
 	}
-	return true
+	return client, true
 }
 func (s *Server) token(w http.ResponseWriter, r *http.Request) {
-	if !s.authenticateClient(w, r) {
+	client, ok := s.authenticateClient(w, r)
+	if !ok {
 		return
 	}
 	f := r.PostForm
@@ -324,13 +356,17 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		challenge = base64.RawURLEncoding.EncodeToString(sum[:])
 		hash = digest(f.Get("code"))
 	case "refresh_token":
+		if !client.refresh {
+			oauthError(w, 400, "unauthorized_client")
+			return
+		}
 		hash = digest(f.Get("refresh_token"))
 	default:
 		oauthError(w, 400, "unsupported_grant_type")
 		return
 	}
 	access, refresh := randomToken(), randomToken()
-	scope, err := s.store.Exchange(r.Context(), exchange{Kind: kind, Hash: hash, Binding: s.binding, RequestedScope: f.Get("scope"), RedirectURI: f.Get("redirect_uri"), Challenge: challenge,
+	scope, err := s.store.Exchange(r.Context(), exchange{Kind: kind, Hash: hash, Binding: s.binding, ClientHash: client.hash, RequestedScope: f.Get("scope"), RedirectURI: f.Get("redirect_uri"), Challenge: challenge,
 		AccessHash: digest(access), RefreshHash: digest(refresh), AccessExpiresAt: time.Now().Add(time.Hour), RefreshExpiresAt: time.Now().Add(30 * 24 * time.Hour)})
 	if err != nil {
 		if errors.Is(err, errInvalidGrant) {
@@ -347,10 +383,11 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, result)
 }
 func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
-	if !s.authenticateClient(w, r) {
+	client, ok := s.authenticateClient(w, r)
+	if !ok {
 		return
 	}
-	if err := s.store.Revoke(r.Context(), digest(r.PostForm.Get("token")), s.binding); err != nil {
+	if err := s.store.Revoke(r.Context(), digest(r.PostForm.Get("token")), s.binding, client.hash); err != nil {
 		s.internalError(w, r, err)
 		return
 	}

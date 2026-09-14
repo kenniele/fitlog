@@ -17,8 +17,9 @@ FitLog предоставляет один HTTP-адрес `/mcp` с инстр�
 Обработчики возвращают JSON в `structuredContent` и текстовый JSON для клиентов,
 которым нужен `content`. JSON-RPC, initialize, schemas и tools/list обслуживает SDK.
 
-`internal/mcpauth` отвечает за OAuth для одного заранее зарегистрированного
-клиента. Он отделён от WHOOP/FatSecret OAuth и от dashboard-cookie. Авторизация
+`internal/mcpauth` отвечает за OAuth для заранее зарегистрированного веб-клиента
+и настольных клиентов с автоматической регистрацией DCR. Он отделён от
+WHOOP/FatSecret OAuth и от dashboard-cookie. Авторизация
 MCP не разрешает ИИ читать ключи, переключать пользователя или менять настройки
 провайдеров. Владелец совпадает с `Config.DashboardOwner()`: явно заданный
 `FITLOG_DASHBOARD_OWNER_ID`, иначе первый `TELEGRAM_ALLOWED_USER_IDS`.
@@ -100,7 +101,8 @@ OAuth-провайдеров или массовой перезаписи сущ
 
 1. Примени миграции стандартной командой `fitlog migrate`/`make migrate-up` при
    развёртывании. Миграция `00013_mcp_oauth.sql` добавляет отдельную таблицу
-   OAuth-grants; фитнес-таблицы не изменяет.
+   OAuth-grants, а `00014_mcp_native_clients.sql` добавляет привязку grant к
+   клиенту. Существующие веб-подключения сохраняются; фитнес-таблицы не меняются.
 2. Сгенерируй **два разных** секрета, например дважды выполнив
    `openssl rand -hex 32`. Не публикуй их в репозитории или чате.
 3. Настрой окружение приложения:
@@ -119,12 +121,15 @@ FITLOG_MCP_REDIRECT_URIS=https://chatgpt.com/connector_platform_oauth_redirect
 что позволяет ChatGPT использовать указанный стабильный callback. Всё равно
 сверь **точный** callback в настройках созданного MCP-подключения: если интерфейс
 показывает другой адрес, используй именно его. Несколько разрешённых callback
-задаются через запятую, без wildcard и без пробелов. Для другого клиента также
-нужен его точный HTTPS callback. Не добавляй произвольные адреса.
+задаются через запятую, без wildcard и без пробелов. Этот список относится к
+заранее зарегистрированному веб-клиенту. Настольное приложение регистрирует
+локальный callback автоматически: добавлять его в `.env` не нужно.
 
-`FITLOG_MCP_CLIENT_SECRET` вводится в OAuth-настройках подключения ChatGPT.
+`FITLOG_MCP_CLIENT_SECRET` вводится в OAuth-настройках веб-подключения ChatGPT.
 `FITLOG_MCP_LOGIN_TOKEN` вводится только на странице разрешения доступа **FitLog**.
 Dashboard token, ключ шифрования и токены WHOOP/FatSecret для этого не нужны.
+При обновлении уже настроенного MCP существующие значения `.env` подходят;
+новых переменных для настольного клиента нет.
 
 4. Добавь маршруты в реальный Caddyfile по обновлённому
    `deployments/Caddyfile.example`: `/mcp`, `/oauth/mcp/*` и три указанных там
@@ -144,7 +149,43 @@ curl -fsS https://your-fitlog.example/.well-known/oauth-protected-resource/mcp
 curl -fsS https://your-fitlog.example/.well-known/oauth-authorization-server
 ```
 
-## Подключение ChatGPT / Work
+## Подключение в настольном ChatGPT Work / Codex
+
+В настройках MCP добавь сервер:
+
+- Имя: `FitLog`.
+- Тип: **Потоковая передача HTTP / Streamable HTTP**.
+- URL: `https://your-fitlog.example/mcp`.
+- Переменная окружения токена Bearer, заголовки и заголовки из переменных
+  окружения: **оставь пустыми**.
+
+Сохрани подключение, выполни Restart в списке MCP и нажми **Authenticate /
+Авторизоваться**, когда клиент запросит вход. На открывшейся странице своего
+FitLog введи `FITLOG_MCP_LOGIN_TOKEN` и разреши доступ. Client Secret в настольное
+приложение вводить не требуется: клиент сам получает `client_id` через
+`POST /oauth/mcp/register` и использует PKCE S256. Поля Bearer и заголовков
+после входа также остаются пустыми — OAuth-токены сохраняет сам клиент.
+
+Автоматическая регистрация поддерживает публичные native-клиенты с HTTP callback
+на `127.0.0.1` или `[::1]`. Порт выбирает приложение; хост, путь и query должны
+совпадать с регистрацией. Произвольные адреса, DNS-имена (включая `localhost`),
+userinfo и fragments не принимаются. CIMD не рекламируется: клиент выбирает DCR.
+Регистрация сама по себе не даёт доступа к журналу без входа владельца.
+
+После обновления серверной версии проверь, что discovery содержит
+`registration_endpoint` с `/oauth/mcp/register` и метод `none`:
+
+```bash
+curl -fsS https://your-fitlog.example/.well-known/oauth-authorization-server
+```
+
+Если настольное подключение было создано вручную с фиксированным OAuth Client ID,
+создай его заново без Client ID, чтобы приложение выполнило DCR. При смене ключей
+FitLog старую регистрацию также нужно создать заново. На показанной HTTP-форме
+достаточно URL; `FITLOG_MCP_LOGIN_TOKEN` и `FITLOG_MCP_CLIENT_SECRET` не являются
+Bearer-токенами.
+
+## Подключение в веб-версии ChatGPT / Work
 
 Включи Developer mode, создай пользовательское MCP-подключение в разделе
 Plugins/Apps и укажи:
@@ -156,8 +197,8 @@ Plugins/Apps и укажи:
 
 Пройди страницу разрешения FitLog с `FITLOG_MCP_LOGIN_TOKEN` и выбери
 подключение в чате/задаче Work. Доступность настройки зависит от разрешений
-аккаунта/рабочего пространства. Автоматическая регистрация DCR и CIMD в этой
-версии не реализованы: не оставляй поля клиента пустыми.
+аккаунта/рабочего пространства. Для веб-версии используй заданные client
+credentials: DCR в FitLog ограничена локальными callback настольных клиентов.
 
 После включения `FITLOG_MCP_ALLOW_WRITES=true` повторно авторизуй подключение
 со scope `fitlog:write` и обнови список инструментов в клиенте. Читающий токен
@@ -178,16 +219,32 @@ Plugins/Apps и укажи:
 
 ## OAuth и отзыв доступа
 
-Используются authorization code + PKCE S256, точное совпадение redirect URI,
+Используются authorization code + PKCE S256, точное совпадение redirect URI
+(с исключением порта при регистрации native loopback callback по RFC 8252),
 CSRF-защита формы с привязкой к параметрам разрешения, проверка audience/resource
 и scope. Access token живёт час. `offline_access` позволяет обновлять подключение
 до 30 дней от выдачи. Refresh token ротируется; старые code/refresh не принимаются
 повторно. Операция обновления токенов атомарна в PostgreSQL. Grants сохраняются
 между перезапусками; в таблице лежат только хеши случайных кодов и токенов.
+При обмене кода callback должен полностью совпасть с исходным запросом, включая
+порт. Обмен кода, refresh и отзыв проверяют клиентскую привязку: один клиент
+не может использовать или отозвать grant другого.
+
+У проверенной страницы consent в CSP отсутствует `form-action`, поскольку
+некоторые браузеры применяют эту директиву и к последующему OAuth-редиректу.
+Форма отправляется только на исходный адрес FitLog; скрипты, встраивание страницы
+и изменение base URL запрещены, CSRF и Origin проверяются при POST.
+
+Регистрация DCR возвращает подписанный HMAC-SHA256 `client_id` с метаданными и
+случайным nonce (stateless registration, RFC 7591 A.5.2). Это публичный
+идентификатор, не секрет и не токен доступа. Регистрации не пишутся в БД,
+не накапливаются в памяти и сохраняются между перезапусками при прежних ключах.
+Тело регистрации ограничено 8 KiB; сервер не загружает URL из метаданных клиента.
 
 `POST /oauth/mcp/revoke` с OAuth client authentication и полем `token` отзывает
-соответствующий grant целиком. Изменение login token или client secret отзывает
-все прежние grants этого подключения; смена владельца, callback-списка, client ID
+соответствующий grant целиком. Native-клиент передаёт только свой `client_id`
+без секрета. Изменение login token или client secret отзывает
+все прежние grants и DCR-регистрации; смена владельца, callback-списка, client ID
 или публичного origin также делает их недействительными. Удаление приложения
 из ChatGPT не следует считать гарантированным отзывом на стороне FitLog, если
 клиент не вызвал revocation endpoint.
@@ -208,7 +265,12 @@ TEST_DATABASE_URL='postgres://.../fitlog_test?sslmode=disable' \
   go test -race -tags=integration ./internal/mcpauth
 ```
 
+Тесты без БД проходят цепочку DCR → consent → code exchange → MCP tools/list,
+проверяют PKCE, подмену callback/client, ротацию и отзыв токенов, разделение
+web/native grants и доступность инструментов по scope и переключателю записи.
+
 Интеграционный тест проверяет одноразовый конкурентный обмен OAuth-кода,
+клиентскую изоляцию в реальных SQL-операциях,
 сохранение grants между экземплярами сервера, срок действия, четыре записи через
 HTTP MCP, повторные request IDs и недоступность записи другому владельцу.
 Он не обращается к настоящим WHOOP, FatSecret или Telegram. Обычная команда
@@ -220,6 +282,10 @@ HTTP MCP, повторные request IDs и недоступность запи�
 - [Официальный Go SDK MCP](https://github.com/modelcontextprotocol/go-sdk).
 - [OpenAI: OAuth, PKCE, predefined clients и callback URI](https://developers.openai.com/plugins/build/auth).
 - [OpenAI: Developer mode, Streamable HTTP и инструменты чтения/записи](https://developers.openai.com/api/docs/guides/developer-mode).
+- [OpenAI: MCP в настольном приложении, DCR и локальные callback](https://learn.chatgpt.com/docs/extend/mcp).
+- [RFC 7591: Dynamic Client Registration](https://www.rfc-editor.org/rfc/rfc7591.html).
+- [RFC 8252: OAuth для native-приложений](https://www.rfc-editor.org/rfc/rfc8252.html).
+- [MDN: form-action и редиректы после отправки формы](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/form-action).
 
 Реальное подключение к аккаунту ChatGPT/Work проверяется после развёртывания;
 локальные протокольные тесты не заменяют эту проверку.

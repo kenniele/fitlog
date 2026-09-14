@@ -41,7 +41,7 @@ func (s *memoryStore) Exchange(_ context.Context, e exchange) (string, error) {
 	defer s.mu.Unlock()
 	for i := range s.grants {
 		g := &s.grants[i]
-		if g.Binding != e.Binding {
+		if g.Binding != e.Binding || g.ClientHash != e.ClientHash {
 			continue
 		}
 		ok := e.Kind == "authorization_code" && g.CodeHash == e.Hash && time.Now().Before(g.CodeExpiresAt) && g.RedirectURI == e.RedirectURI && g.Challenge == e.Challenge
@@ -79,11 +79,11 @@ func (s *memoryStore) Validate(_ context.Context, hash, binding string) (string,
 	}
 	return "", errInvalidGrant
 }
-func (s *memoryStore) Revoke(_ context.Context, hash, binding string) error {
+func (s *memoryStore) Revoke(_ context.Context, hash, binding, clientHash string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, g := range s.grants {
-		if g.Binding == binding && (g.access == hash || g.refresh == hash) {
+		if g.Binding == binding && g.ClientHash == clientHash && (g.access == hash || g.refresh == hash) {
 			s.grants = append(s.grants[:i], s.grants[i+1:]...)
 			break
 		}
@@ -270,7 +270,7 @@ func TestOAuthExchangeRefreshAndRevocation(t *testing.T) {
 	if _, err := s.store.Validate(t.Context(), digest(first["access_token"].(string)), s.binding); err == nil {
 		t.Fatal("old access still valid")
 	}
-	if err := s.store.Revoke(t.Context(), digest(second["refresh_token"].(string)), s.binding); err != nil {
+	if err := s.store.Revoke(t.Context(), digest(second["refresh_token"].(string)), s.binding, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.store.Validate(t.Context(), digest(second["access_token"].(string)), s.binding); err == nil {
