@@ -234,6 +234,12 @@ CSRF-защита формы с привязкой к параметрам ра�
 некоторые браузеры применяют эту директиву и к последующему OAuth-редиректу.
 Форма отправляется только на исходный адрес FitLog; скрипты, встраивание страницы
 и изменение base URL запрещены, CSRF и Origin проверяются при POST.
+Consent GET использует `Referrer-Policy: strict-origin`: браузер сохраняет Origin
+при отправке формы, не раскрывая query-параметры URL. `no-referrer` на этой
+странице приводит к `Origin: null` и отказу в доступе. На остальных ответах,
+включая редирект с кодом, остаётся `no-referrer`. Если POST отклонён, лог
+`MCP consent rejected` различает `origin_mismatch` и `csrf_mismatch`; значения
+ключа, cookie и OAuth-параметров в него не записываются.
 
 Регистрация DCR возвращает подписанный HMAC-SHA256 `client_id` с метаданными и
 случайным nonce (stateless registration, RFC 7591 A.5.2). Это публичный
@@ -286,6 +292,7 @@ HTTP MCP, повторные request IDs и недоступность запи�
 - [RFC 7591: Dynamic Client Registration](https://www.rfc-editor.org/rfc/rfc7591.html).
 - [RFC 8252: OAuth для native-приложений](https://www.rfc-editor.org/rfc/rfc8252.html).
 - [MDN: form-action и редиректы после отправки формы](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/form-action).
+- [MDN: влияние Referrer-Policy на Origin формы](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Referrer-Policy#effect_on_the_origin_header).
 
 Реальное подключение к аккаунту ChatGPT/Work проверяется после развёртывания;
 локальные протокольные тесты не заменяют эту проверку.

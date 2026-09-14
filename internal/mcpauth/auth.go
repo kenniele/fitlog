@@ -218,6 +218,9 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 		// The form action is fixed to FitLog, and the callback is validated above.
 		// Keep scripts/frames disabled, but allow navigation back to the client.
 		w.Header().Set("Content-Security-Policy", consentCSP)
+		// no-referrer makes browsers send Origin:null on HTML form POSTs.
+		// Preserve Origin without sending the authorization URL's query string.
+		w.Header().Set("Referrer-Policy", "strict-origin")
 		csrf := randomToken()
 		http.SetCookie(w, &http.Cookie{Name: loginCookie, Value: csrf, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, MaxAge: 600})
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -225,6 +228,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Header.Get("Origin") != s.cfg.BaseURL {
+		s.logger.WarnContext(r.Context(), "MCP consent rejected", "reason", "origin_mismatch")
 		oauthError(w, 403, "invalid_request")
 		return
 	}
@@ -234,6 +238,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	cookie, err := r.Cookie(loginCookie)
 	if err != nil || cookie.Value == "" || !equal(s.consentCSRF(cookie.Value, q), r.PostForm.Get("csrf")) {
+		s.logger.WarnContext(r.Context(), "MCP consent rejected", "reason", "csrf_mismatch")
 		oauthError(w, 403, "invalid_request")
 		return
 	}

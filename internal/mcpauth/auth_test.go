@@ -308,6 +308,53 @@ func TestConsentRejectsTampering(t *testing.T) {
 		})
 	}
 }
+
+func TestConsentReferrerPolicyPreservesFormOrigin(t *testing.T) {
+	s, _ := testServer(t)
+	q := authorizeQuery(s)
+	w := httptest.NewRecorder()
+	s.Routes().ServeHTTP(w, httptest.NewRequest("GET", s.cfg.BaseURL+"/oauth/mcp/authorize?"+q.Encode(), nil))
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	// HTML form POSTs send Origin:null under no-referrer, even to the same
+	// origin (Fetch's "append a request Origin header" algorithm).
+	// strict-origin preserves Origin without disclosing the OAuth URL query.
+	if got := w.Header().Get("Referrer-Policy"); got != "strict-origin" {
+		t.Fatalf("consent policy must preserve form Origin without leaking the query: %q", got)
+	}
+	cookie, csrf := beginConsent(t, s, q)
+	w = approve(t, s, q, cookie, csrf, s.cfg.LoginToken)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("same-origin form rejected: %d %s", w.Code, w.Body.String())
+	}
+	// The callback response must still suppress the referrer on navigation.
+	if got := w.Header().Get("Referrer-Policy"); got != "no-referrer" {
+		t.Fatalf("OAuth callback response lost its referrer policy: %q", got)
+	}
+}
+
+func TestConsentRejectsMissingNullAndForeignOrigin(t *testing.T) {
+	for _, origin := range []string{"", "null", "https://evil.example"} {
+		t.Run(origin, func(t *testing.T) {
+			s, store := testServer(t)
+			q := authorizeQuery(s)
+			cookie, csrf := beginConsent(t, s, q)
+			form := url.Values{"csrf": {csrf}, "login_token": {s.cfg.LoginToken}, "decision": {"allow"}}
+			r := httptest.NewRequest("POST", s.cfg.BaseURL+"/oauth/mcp/authorize?"+q.Encode(), strings.NewReader(form.Encode()))
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			if origin != "" {
+				r.Header.Set("Origin", origin)
+			}
+			r.AddCookie(cookie)
+			w := httptest.NewRecorder()
+			s.Routes().ServeHTTP(w, r)
+			if w.Code != 403 || len(store.grants) != 0 || w.Header().Get("Location") != "" {
+				t.Fatalf("untrusted form origin accepted: %d", w.Code)
+			}
+		})
+	}
+}
 func TestScopeAndOwnerIsolation(t *testing.T) {
 	s, store := testServer(t)
 	code := approvedCode(t, s)
