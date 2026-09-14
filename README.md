@@ -25,6 +25,20 @@ make run
 
 In Telegram, send any text to reveal the keyboard. Press **Здоровье🫀** or **Питание 🥑**; when the provider is not connected yet, the bot responds with an OAuth authorization button. Both providers' delegated tokens are encrypted in PostgreSQL.
 
+## MCP for ChatGPT / ChatGPT Work
+
+The optional `/mcp` Streamable HTTP endpoint exposes 12 read tools and four
+opt-in write tools over the same owner-scoped journal: context, overview,
+analytics, workouts, plans, exercises, nutrition, sleep, recovery and body data.
+It uses the official Go MCP SDK and OAuth authorization-code flow with PKCE,
+a pre-registered client, persisted token grants and separate read/write scopes.
+Telegram commands, CLI and the web API remain available.
+
+MCP is disabled by default. Enabling it requires HTTPS, migration 00013,
+separate client/login secrets and an exact ChatGPT callback URI. Follow the
+[setup and tool reference](docs/mcp.md), including the Caddy routing changes
+and the distinction between daily nutrition totals and individual meals.
+
 ## FitLog Control Center
 
 The optional Control Center is a single-user web workspace at `/dashboard` for

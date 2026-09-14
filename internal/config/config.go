@@ -37,6 +37,13 @@ type Config struct {
 	DashboardToken   string `env:"FITLOG_DASHBOARD_TOKEN"`
 	DashboardOwnerID int64  `env:"FITLOG_DASHBOARD_OWNER_ID"`
 
+	MCPEnabled      bool     `env:"FITLOG_MCP_ENABLED" envDefault:"false"`
+	MCPAllowWrites  bool     `env:"FITLOG_MCP_ALLOW_WRITES" envDefault:"false"`
+	MCPClientID     string   `env:"FITLOG_MCP_CLIENT_ID" envDefault:"fitlog-chatgpt"`
+	MCPClientSecret string   `env:"FITLOG_MCP_CLIENT_SECRET"`
+	MCPLoginToken   string   `env:"FITLOG_MCP_LOGIN_TOKEN"`
+	MCPRedirectURIs []string `env:"FITLOG_MCP_REDIRECT_URIS" envSeparator:","`
+
 	ProviderSyncInterval       time.Duration `env:"FITLOG_PROVIDER_SYNC_INTERVAL" envDefault:"1h"`
 	ProviderSyncLookbackDays   int           `env:"FITLOG_PROVIDER_SYNC_LOOKBACK_DAYS" envDefault:"3"`
 	FatSecretStorageAuthorized bool          `env:"FATSECRET_STORAGE_AUTHORIZED" envDefault:"false"`

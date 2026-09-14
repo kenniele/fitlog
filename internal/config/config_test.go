@@ -79,3 +79,21 @@ func TestDashboardOwner(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestMCPConfig(t *testing.T) {
+	for key, value := range map[string]string{"DATABASE_URL": "unused", "FITLOG_TOKEN_ENCRYPTION_KEY": "unused", "WHOOP_CLIENT_ID": "unused", "WHOOP_CLIENT_SECRET": "unused", "WHOOP_REDIRECT_URI": "https://fitlog.example/callback", "FATSECRET_CONSUMER_KEY": "unused", "FATSECRET_CONSUMER_SECRET": "unused", "TELEGRAM_BOT_TOKEN": "unused", "TELEGRAM_ALLOWED_USER_IDS": "42", "FITLOG_MCP_ENABLED": "false", "FITLOG_MCP_ALLOW_WRITES": "false", "FITLOG_MCP_CLIENT_ID": "fitlog-chatgpt", "FITLOG_MCP_CLIENT_SECRET": "", "FITLOG_MCP_LOGIN_TOKEN": "", "FITLOG_MCP_REDIRECT_URIS": ""} {
+		t.Setenv(key, value)
+	}
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.False(t, cfg.MCPEnabled)
+	require.False(t, cfg.MCPAllowWrites)
+	t.Setenv("FITLOG_MCP_ENABLED", "true")
+	t.Setenv("FITLOG_MCP_ALLOW_WRITES", "true")
+	t.Setenv("FITLOG_MCP_REDIRECT_URIS", "https://chatgpt.com/cb,https://chatgpt.com/cb2")
+	cfg, err = Load()
+	require.NoError(t, err)
+	require.True(t, cfg.MCPEnabled)
+	require.True(t, cfg.MCPAllowWrites)
+	require.Len(t, cfg.MCPRedirectURIs, 2)
+}

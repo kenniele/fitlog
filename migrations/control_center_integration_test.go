@@ -35,6 +35,9 @@ func TestControlCenterMigrationDownUp(t *testing.T) {
 			t.Errorf("restore migration after test: %v", err)
 		}
 	})
+	if err := goose.DownToContext(ctx, db, ".", 12); err != nil {
+		t.Fatalf("roll back migrations following InBody: %v", err)
+	}
 	if err := goose.DownContext(ctx, db, "."); err != nil {
 		t.Fatalf("roll back InBody migration: %v", err)
 	}

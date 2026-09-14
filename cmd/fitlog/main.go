@@ -18,6 +18,8 @@ import (
 	"fitlog/internal/config"
 	"fitlog/internal/controlcenter"
 	"fitlog/internal/fatsecret"
+	"fitlog/internal/mcpauth"
+	"fitlog/internal/mcpserver"
 	"fitlog/internal/observability"
 	"fitlog/internal/obsidian"
 	"fitlog/internal/providersync"
@@ -139,6 +141,22 @@ func run(parent context.Context) error {
 	}
 	defer pool.Close()
 	controlCenterRepo := controlcenter.NewRepository(pool)
+	var mcpHandler, mcpOAuth http.Handler
+	if cfg.MCPEnabled {
+		mcpAuth, err := mcpauth.NewServer(mcpauth.Config{
+			BaseURL: publicBaseURL, OwnerID: ownerID,
+			ClientID: cfg.MCPClientID, ClientSecret: cfg.MCPClientSecret,
+			LoginToken: cfg.MCPLoginToken, RedirectURIs: cfg.MCPRedirectURIs,
+			AllowWrites: cfg.MCPAllowWrites,
+		}, pool, logger)
+		if err != nil {
+			return fmt.Errorf("MCP configuration: %w", err)
+		}
+		mcpHandler = mcpAuth.Protect(mcpserver.NewHandler(controlCenterRepo, mcpserver.Options{
+			OwnerID: ownerID, Location: loc, Logger: logger, CanWrite: mcpauth.CanWrite,
+		}))
+		mcpOAuth = mcpAuth.Routes()
+	}
 
 	// Crypto + token store
 	cipher, err := auth.NewCipherFromBase64(cfg.TokenEncryptionKey)
@@ -219,7 +237,7 @@ func run(parent context.Context) error {
 	)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           server.RouterWithAPI(cb, fsOAuth, pool, articleHandler, controlCenterAPI),
+		Handler:           server.RouterWithMCP(cb, fsOAuth, pool, articleHandler, controlCenterAPI, mcpHandler, mcpOAuth),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

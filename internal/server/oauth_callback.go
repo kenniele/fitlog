@@ -114,6 +114,12 @@ func Router(h *CallbackHandler, fatSecret *FatSecretOAuth, database HealthChecke
 // RouterWithAPI builds the complete HTTP surface. api is mounted below
 // /api/v1 so its handlers can stay unaware of deployment-specific prefixes.
 func RouterWithAPI(h *CallbackHandler, fatSecret *FatSecretOAuth, database HealthChecker, articles, api http.Handler) http.Handler {
+	return RouterWithMCP(h, fatSecret, database, articles, api, nil, nil)
+}
+
+// RouterWithMCP adds the independently authenticated MCP and OAuth handlers.
+// Nil handlers keep the existing HTTP surface unchanged.
+func RouterWithMCP(h *CallbackHandler, fatSecret *FatSecretOAuth, database HealthChecker, articles, api, mcp, oauth http.Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/healthz", func(w http.ResponseWriter, request *http.Request) {
 		ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
@@ -139,6 +145,15 @@ func RouterWithAPI(h *CallbackHandler, fatSecret *FatSecretOAuth, database Healt
 	}
 	if api != nil {
 		r.Mount("/api/v1", http.StripPrefix("/api/v1", api))
+	}
+	if mcp != nil {
+		r.Handle("/mcp", mcp)
+	}
+	if oauth != nil {
+		r.Mount("/oauth/mcp", oauth)
+		for _, path := range []string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-authorization-server"} {
+			r.Handle(path, oauth)
+		}
 	}
 	return r
 }

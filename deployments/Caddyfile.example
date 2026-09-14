@@ -11,7 +11,7 @@
 fitlog.chickenkiller.com {
     encode zstd gzip
 
-    @backend path /api/* /healthz /oauth/* /callback /articles /articles/*
+    @backend path /api/* /healthz /oauth/* /callback /articles /articles/* /mcp /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/mcp /.well-known/oauth-authorization-server
     handle @backend {
         reverse_proxy app:8080
     }

@@ -3,19 +3,24 @@ package controlcenter
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 )
 
 func ParseDateRange(r *http.Request, loc *time.Location, now time.Time) (DateRange, error) {
+	return ParseDateRangeValues(r.URL.Query(), loc, now)
+}
+
+// ParseDateRangeValues shares calendar validation between HTTP and MCP.
+func ParseDateRangeValues(query url.Values, loc *time.Location, now time.Time) (DateRange, error) {
 	if loc == nil {
 		loc = time.UTC
 	}
 	today := now.In(loc)
 	today = time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, loc)
 	from, to := today.AddDate(0, 0, -29), today
-	query := r.URL.Query()
 	if raw := strings.TrimSpace(query.Get("from")); raw != "" {
 		parsed, err := time.ParseInLocation("2006-01-02", raw, loc)
 		if err != nil {
@@ -48,9 +53,14 @@ func ParseDateRange(r *http.Request, loc *time.Location, now time.Time) (DateRan
 }
 
 func ParsePagination(r *http.Request, loc *time.Location) (Pagination, error) {
+	return ParsePaginationValues(r.URL.Query(), loc)
+}
+
+// ParsePaginationValues shares pagination and filter validation across transports.
+func ParsePaginationValues(query url.Values, loc *time.Location) (Pagination, error) {
 	page, pageSize := 1, 25
 	fields := make(map[string]string)
-	if raw := strings.TrimSpace(r.URL.Query().Get("page")); raw != "" {
+	if raw := strings.TrimSpace(query.Get("page")); raw != "" {
 		value, err := strconv.Atoi(raw)
 		if err != nil || value < 1 {
 			fields["page"] = "must be a positive integer"
@@ -58,7 +68,7 @@ func ParsePagination(r *http.Request, loc *time.Location) (Pagination, error) {
 			page = value
 		}
 	}
-	if raw := strings.TrimSpace(r.URL.Query().Get("page_size")); raw != "" {
+	if raw := strings.TrimSpace(query.Get("page_size")); raw != "" {
 		value, err := strconv.Atoi(raw)
 		if err != nil || value < 1 || value > MaxPageSize {
 			fields["page_size"] = fmt.Sprintf("must be between 1 and %d", MaxPageSize)
@@ -66,9 +76,9 @@ func ParsePagination(r *http.Request, loc *time.Location) (Pagination, error) {
 			pageSize = value
 		}
 	}
-	options := Pagination{Page: page, PageSize: pageSize, Search: strings.TrimSpace(r.URL.Query().Get("search")), Filters: map[string]string{}}
+	options := Pagination{Page: page, PageSize: pageSize, Search: strings.TrimSpace(query.Get("search")), Filters: map[string]string{}}
 	for _, key := range []string{"status", "source", "exercise_id", "plan_id", "template_id", "date_basis"} {
-		if value := strings.TrimSpace(r.URL.Query().Get(key)); value != "" {
+		if value := strings.TrimSpace(query.Get(key)); value != "" {
 			options.Filters[key] = value
 		}
 	}
@@ -79,7 +89,7 @@ func ParsePagination(r *http.Request, loc *time.Location) (Pagination, error) {
 		fields["date_basis"] = "use actual or calendar"
 	}
 	for key, target := range map[string]**time.Time{"from": &options.From, "to": &options.To} {
-		if raw := strings.TrimSpace(r.URL.Query().Get(key)); raw != "" {
+		if raw := strings.TrimSpace(query.Get(key)); raw != "" {
 			value, err := time.ParseInLocation("2006-01-02", raw, loc)
 			if err != nil {
 				fields[key] = "use YYYY-MM-DD"
@@ -104,9 +114,14 @@ func ParsePagination(r *http.Request, loc *time.Location) (Pagination, error) {
 }
 
 func ParseAnalyticsFilters(r *http.Request) (AnalyticsFilters, error) {
+	return ParseAnalyticsFilterValues(r.URL.Query())
+}
+
+// ParseAnalyticsFilterValues validates owner-scoped analytics filters.
+func ParseAnalyticsFilterValues(query url.Values) (AnalyticsFilters, error) {
 	filters := AnalyticsFilters{
-		Status:  strings.TrimSpace(r.URL.Query().Get("status")),
-		DayType: strings.TrimSpace(r.URL.Query().Get("day_type")),
+		Status:  strings.TrimSpace(query.Get("status")),
+		DayType: strings.TrimSpace(query.Get("day_type")),
 	}
 	fields := map[string]string{}
 	for key, destination := range map[string]**int64{
@@ -114,7 +129,7 @@ func ParseAnalyticsFilters(r *http.Request) (AnalyticsFilters, error) {
 		"plan_id":     &filters.PlanID,
 		"template_id": &filters.TemplateID,
 	} {
-		raw := strings.TrimSpace(r.URL.Query().Get(key))
+		raw := strings.TrimSpace(query.Get(key))
 		if raw == "" {
 			continue
 		}

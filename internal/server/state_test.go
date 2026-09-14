@@ -88,3 +88,21 @@ func TestStateStore_UnknownState(t *testing.T) {
 	_, ok := s.Consume("never-issued")
 	require.False(t, ok)
 }
+
+func TestRouterMountsMCPAndOAuthWithoutStrippingPaths(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(r.URL.Path)) })
+	router := RouterWithMCP(nil, nil, healthChecker{}, nil, nil, handler, handler)
+	for _, path := range []string{"/mcp", "/oauth/mcp/authorize", "/oauth/mcp/token", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-authorization-server"} {
+		t.Run(path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, nil))
+			require.Equal(t, 200, w.Code)
+			require.Equal(t, path, w.Body.String())
+		})
+	}
+	for _, path := range []string{"/mcp", "/oauth/mcp/token", "/.well-known/oauth-protected-resource"} {
+		w := httptest.NewRecorder()
+		RouterWithAPI(nil, nil, healthChecker{}, nil, nil).ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, nil))
+		require.Equal(t, 404, w.Code)
+	}
+}
