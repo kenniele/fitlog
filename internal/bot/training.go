@@ -28,6 +28,8 @@ const (
 	trainingCallbackCancelSet               = "training_cancel_set"
 	trainingCallbackReorder                 = "training_reorder"
 	trainingCallbackPrioritizeExercise      = "training_prioritize_ex"
+	trainingCallbackReplaceExercisePage     = "tr_replace_page"
+	trainingCallbackReplaceExercise         = "tr_replace_ex"
 	trainingCallbackFinishExercise          = "training_finish_exercise"
 	trainingCallbackNote                    = "training_note"
 	trainingCallbackPrograms                = "training_programs"
@@ -74,6 +76,8 @@ func (b *Bot) registerTrainingHandlers() {
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackCancelSet}, b.handleTrainingCancelSet, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackReorder}, b.handleTrainingReorder, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackPrioritizeExercise}, b.handleTrainingPrioritizeExercise, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackReplaceExercisePage}, b.handleTrainingReplaceExercisePage, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackReplaceExercise}, b.handleTrainingReplaceExercise, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackFinishExercise}, b.handleTrainingFinishExercise, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackNote}, b.handleTrainingNote, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackPrograms}, b.handleTrainingPrograms, currentCard)
@@ -1245,6 +1249,11 @@ func (b *Bot) showActiveTraining(ctx context.Context, c tele.Context, session tr
 		)
 		if hasAnotherUnfinishedExercise(session, exercise.ID) {
 			rows = append(rows, markup.Row(markup.Data("🔀 Изменить порядок", trainingCallbackReorder)))
+		}
+		if exercise.CanReplace() {
+			rows = append(rows, markup.Row(markup.Data(
+				"🔁 Заменить упражнение", trainingCallbackReplaceExercisePage, trainingPair(exercise.ID, 1),
+			)))
 		}
 		rows = append(rows, markup.Row(markup.Data("✅ Завершить упражнение", trainingCallbackFinishExercise, exerciseID)))
 	}

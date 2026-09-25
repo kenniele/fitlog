@@ -782,6 +782,22 @@ func (u *UseCase) PrioritizeExercise(ctx context.Context, ownerID, exerciseID in
 	return u.repo.PrioritizeExercise(ctx, ownerID, exerciseID)
 }
 
+// ReplaceCurrentExercise changes only the active session's exercise snapshot.
+// The repository validates the expected exercise under the same lock as AddSet.
+func (u *UseCase) ReplaceCurrentExercise(ctx context.Context, ownerID, sessionExerciseID, targetExerciseID int64) (Session, error) {
+	if sessionExerciseID <= 0 || targetExerciseID <= 0 {
+		return Session{}, ErrNotEditable
+	}
+	session, err := u.repo.ReplaceCurrentExercise(ctx, ownerID, sessionExerciseID, targetExerciseID)
+	if err != nil {
+		return Session{}, err
+	}
+	if err := u.ClearInput(ctx, ownerID); err != nil {
+		return Session{}, err
+	}
+	return session, nil
+}
+
 func (u *UseCase) ReopenExercise(ctx context.Context, ownerID, sessionID, exerciseID int64) (Session, error) {
 	if err := u.ClearInput(ctx, ownerID); err != nil {
 		return Session{}, err

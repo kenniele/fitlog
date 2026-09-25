@@ -18,6 +18,7 @@ var (
 	ErrNoActiveSession = errors.New("no active training session")
 	ErrNoPendingImport = errors.New("no pending program import")
 	ErrNotEditable     = errors.New("exercise cannot be edited yet")
+	ErrExerciseHasSets = errors.New("exercise already has sets")
 	ErrInvalidPage     = errors.New("invalid page")
 	ErrNoPendingSet    = errors.New("no pending training set")
 )
@@ -252,6 +253,20 @@ type SessionExercise struct {
 
 func (e SessionExercise) Structured() bool { return e.Plan.WorkingSets > 0 }
 
+// CanReplace excludes recorded results but permits untouched planned sets.
+func (e SessionExercise) CanReplace() bool {
+	if e.Complete {
+		return false
+	}
+	for _, set := range e.Sets {
+		if set.ActualReps != nil || set.ActualWeightKG != nil || set.ActualRIR != nil ||
+			set.StartedAt != nil || set.CompletedAt != nil || set.Reps > 0 || set.WeightKG != nil || set.RIR != nil {
+			return false
+		}
+	}
+	return true
+}
+
 func (e SessionExercise) WarmupSets() []WorkoutSet {
 	sets := make([]WorkoutSet, 0, len(e.Sets))
 	for _, set := range e.Sets {
@@ -377,6 +392,7 @@ type Repository interface {
 	OverrideCurrentExercise(ctx context.Context, ownerID int64, override ExerciseOverride) (Session, error)
 	SetCurrentExerciseNote(ctx context.Context, ownerID int64, note string) (Session, error)
 	PrioritizeExercise(ctx context.Context, ownerID, exerciseID int64) (Session, error)
+	ReplaceCurrentExercise(ctx context.Context, ownerID, sessionExerciseID, targetExerciseID int64) (Session, error)
 	FinishCurrentExercise(ctx context.Context, ownerID int64, now time.Time) (Session, error)
 	ReopenExercise(ctx context.Context, ownerID, sessionID, exerciseID int64) (Session, error)
 	PreviousExercise(ctx context.Context, ownerID, sessionID int64, exerciseName string) (*PreviousExercise, error)

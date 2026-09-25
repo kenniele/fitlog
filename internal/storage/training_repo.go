@@ -1251,6 +1251,81 @@ func (r *TrainingRepo) PrioritizeExercise(
 	return r.loadSession(ctx, r.pool, ownerID, sessionID)
 }
 
+func (r *TrainingRepo) ReplaceCurrentExercise(
+	ctx context.Context,
+	ownerID, sessionExerciseID, targetExerciseID int64,
+) (training.Session, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return training.Session{}, fmt.Errorf("begin session exercise replacement: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	sessionID, currentExerciseID, err := lockCurrentExercise(ctx, tx, ownerID)
+	if err != nil {
+		return training.Session{}, err
+	}
+	if currentExerciseID != sessionExerciseID {
+		return training.Session{}, training.ErrNotEditable
+	}
+	var complete, hasSets bool
+	var catalogID pgtype.Int8
+	if err := tx.QueryRow(ctx, `
+		SELECT complete, exercise_id,
+		       EXISTS (
+		           SELECT 1 FROM training_sets WHERE session_exercise_id = $1
+		             AND (actual_reps IS NOT NULL OR actual_weight_kg IS NOT NULL OR actual_rir IS NOT NULL
+		                  OR started_at IS NOT NULL OR completed_at IS NOT NULL OR notes <> '')
+		       )
+		FROM training_session_exercises WHERE id = $1`, currentExerciseID,
+	).Scan(&complete, &catalogID, &hasSets); err != nil {
+		return training.Session{}, fmt.Errorf("select exercise for replacement: %w", err)
+	}
+	if complete || (catalogID.Valid && catalogID.Int64 == targetExerciseID) {
+		return training.Session{}, training.ErrNotEditable
+	}
+	if hasSets {
+		return training.Session{}, training.ErrExerciseHasSets
+	}
+	var targetName string
+	if err := tx.QueryRow(ctx, `
+		SELECT name FROM training_exercises WHERE id = $1 AND owner_id = $2`, targetExerciseID, ownerID,
+	).Scan(&targetName); errors.Is(err, pgx.ErrNoRows) {
+		return training.Session{}, training.ErrNotFound
+	} else if err != nil {
+		return training.Session{}, fmt.Errorf("select session replacement exercise: %w", err)
+	}
+
+	// The old exercise's prescription and recommendation do not apply to its
+	// replacement. Keep the session position and notes, and log new sets manually.
+	if _, err := tx.Exec(ctx, `DELETE FROM training_sets WHERE session_exercise_id = $1`, currentExerciseID); err != nil {
+		return training.Session{}, fmt.Errorf("clear replacement exercise planned sets: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE training_session_exercises
+		SET exercise_id = $1, name = $2,
+		    working_sets = NULL, min_reps = NULL, max_reps = NULL,
+		    target_rir = NULL, weight_step_kg = NULL,
+		    rest_between_sets_seconds = NULL, rest_after_exercise_seconds = NULL,
+		    progression_type = NULL, warmup_plan = '[]'::jsonb, recommendation = '{}'::jsonb,
+		    planned_weight_kg = NULL, planned_min_reps = NULL, planned_max_reps = NULL,
+		    planned_working_sets = NULL, planned_target_rir = NULL, planned_rest_seconds = NULL,
+		    overridden = false, updated_at = now()
+		WHERE id = $3`, targetExerciseID, targetName, currentExerciseID,
+	); err != nil {
+		return training.Session{}, fmt.Errorf("replace session exercise: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE training_sessions SET rest_until = NULL, updated_at = now() WHERE id = $1`, sessionID,
+	); err != nil {
+		return training.Session{}, fmt.Errorf("reset replacement exercise rest: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return training.Session{}, fmt.Errorf("commit session exercise replacement: %w", err)
+	}
+	return r.loadSession(ctx, r.pool, ownerID, sessionID)
+}
+
 func (r *TrainingRepo) FinishCurrentExercise(ctx context.Context, ownerID int64, now time.Time) (training.Session, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
