@@ -12,11 +12,16 @@ const estimate: BodyFatEstimate = {
 
 describe("BodyFatEstimateCard", () => {
   afterEach(cleanup);
-  it("shows a range, basis, and explicit model assumptions", () => {
+  it("leads with the estimate and keeps the sensitivity range in collapsed details", () => {
     render(<BodyFatEstimateCard estimate={estimate} />);
-    expect(screen.getByLabelText("Диапазон ожидаемого процента жира")).toHaveTextContent("16,5–21,8%");
-    expect(screen.getByText(/Центральный сценарий/)).toHaveTextContent("19,2%");
+    expect(screen.getByLabelText("Расчётный процент жира")).toHaveTextContent("≈19,2%");
+    expect(screen.getByText(/Изменение от InBody/)).toHaveTextContent("-0,8 п.п. по расчёту");
+    const scenarios = screen.getByLabelText("Диапазон сценариев");
+    expect(scenarios).toHaveTextContent("16,5–21,8%");
+    expect(scenarios.closest("details")).not.toHaveAttribute("open");
+    expect(scenarios).not.toBeVisible();
     expect(screen.getByText(/не статистический доверительный интервал/)).toBeInTheDocument();
+    expect(screen.getByText(/Фактический процент может отличаться/)).toBeVisible();
     expect(screen.getByText(/10 из 10 дней/)).toBeInTheDocument();
   });
 
@@ -29,6 +34,7 @@ describe("BodyFatEstimateCard", () => {
   it.each(["no_tdee", "insufficient_nutrition", "incomplete_inbody", "outside_model"] as const)("explains %s without an estimate", (status) => {
     render(<BodyFatEstimateCard estimate={{ ...estimate, status, percent: undefined, lower_percent: undefined, upper_percent: undefined }} />);
     expect(screen.getByRole("status")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Диапазон ожидаемого процента жира")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Расчётный процент жира")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Диапазон сценариев")).not.toBeInTheDocument();
   });
 });
