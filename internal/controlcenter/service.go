@@ -10,10 +10,17 @@ import (
 )
 
 type Service struct {
-	store   Store
-	ownerID int64
-	loc     *time.Location
-	now     func() time.Time
+	store         Store
+	ownerID       int64
+	loc           *time.Location
+	now           func() time.Time
+	estimatedTDEE float64
+}
+
+type ServiceOption func(*Service)
+
+func WithEstimatedTDEE(kcal float64) ServiceOption {
+	return func(s *Service) { s.estimatedTDEE = kcal }
 }
 
 type requestLocationKey struct{}
@@ -53,11 +60,15 @@ func (s *Service) location(ctx context.Context) *time.Location {
 	return s.loc
 }
 
-func NewService(store Store, ownerID int64, loc *time.Location) *Service {
+func NewService(store Store, ownerID int64, loc *time.Location, options ...ServiceOption) *Service {
 	if loc == nil {
 		loc = time.UTC
 	}
-	return &Service{store: store, ownerID: ownerID, loc: loc, now: time.Now}
+	service := &Service{store: store, ownerID: ownerID, loc: loc, now: time.Now}
+	for _, option := range options {
+		option(service)
+	}
+	return service
 }
 
 func (s *Service) Overview(ctx context.Context, dateRange DateRange) (Overview, error) {
@@ -130,6 +141,11 @@ func (s *Service) Analytics(ctx context.Context, kind string, dateRange DateRang
 		base["summary"] = overview.Summary.Nutrition
 	case "body":
 		base["summary"] = overview.Summary.Body
+		estimate, estimateErr := s.bodyFatEstimate(ctx)
+		if estimateErr != nil {
+			return nil, estimateErr
+		}
+		base["body_fat_estimate"] = estimate
 	case "correlations":
 		base["correlations"] = correlationsFromDaily(daily, correlationCalendar)
 	default:

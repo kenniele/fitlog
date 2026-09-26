@@ -55,6 +55,17 @@ muscle/fat composition, visceral fat, BMR, score, phase angle, and five
 segmental lean/fat measurements. The Body page compares each saved scan with
 the previous one and keeps missing values as missing rather than zero.
 
+The Body page also shows an approximate current body-fat range based on the latest
+InBody and `NUTRITION_ESTIMATED_TDEE` minus logged calories. It uses complete local
+dates after the scan through yesterday, independently of the chart filter, and
+includes surplus days. At least 80% of days need calorie entries; small gaps use
+the observed average and are labeled. The sensitivity range uses TDEE ±15%, food
+±10% (±50% for gaps), and baseline fat ±2 percentage points. These are model
+assumptions, not a confidence interval. The 7700 kcal/kg shortcut assumes unchanged
+lean mass and recalculates the weight denominator; it does not replace an InBody
+measurement. Missing TDEE, incomplete scans, and scans older than 366 full days
+produce an explicit unavailable state. No estimate is stored as a measurement.
+
 Set a long random `FITLOG_DASHBOARD_TOKEN` to enable the API. The owner defaults
 to the first `TELEGRAM_ALLOWED_USER_IDS` entry; set
 `FITLOG_DASHBOARD_OWNER_ID` only when a multi-entry allowlist needs another
@@ -137,7 +148,7 @@ limitations.
 | `WHOOP_REDIRECT_URI`           | yes      | Must match the registered callback (`/oauth/whoop/callback`)         |
 | `FATSECRET_CONSUMER_KEY/SECRET`| yes      | OAuth 1.0 app credentials                                            |
 | `FATSECRET_ACCESS_TOKEN/SECRET`| no       | Legacy fallback; leave blank to connect through Telegram            |
-| `NUTRITION_ESTIMATED_TDEE`     | no       | Maintenance kcal/day used by the 14-day deficit analysis             |
+| `NUTRITION_ESTIMATED_TDEE`     | no       | Maintenance kcal/day used by the deficit report and post-InBody body-fat estimate |
 | `TELEGRAM_BOT_TOKEN`           | yes      | From @BotFather                                                      |
 | `TELEGRAM_ALLOWED_USER_IDS`    | yes      | Comma-separated int64 Telegram user IDs                              |
 | `TELEGRAM_WORKOUT_CHANNEL_IDS` | no       | Comma-separated publish-channel IDs; bot needs permission to post    |

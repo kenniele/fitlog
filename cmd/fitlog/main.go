@@ -154,6 +154,7 @@ func run(parent context.Context) error {
 		}
 		mcpHandler = mcpAuth.Protect(mcpserver.NewHandler(controlCenterRepo, mcpserver.Options{
 			OwnerID: ownerID, Location: loc, Logger: logger, CanWrite: mcpauth.CanWrite,
+			EstimatedTDEE: cfg.NutritionEstimatedTDEE,
 		}))
 		mcpOAuth = mcpAuth.Routes()
 	}
@@ -233,7 +234,7 @@ func run(parent context.Context) error {
 	cb := server.NewCallbackHandler(oauthCfg, states, tokenStore, tb, logger)
 	articleHandler := obsidian.NewHandler(articleReports, logger)
 	controlCenterAPI := controlcenter.NewHandler(
-		controlCenterRepo, ownerID, cfg.DashboardToken, loc,
+		controlCenterRepo, ownerID, cfg.DashboardToken, loc, controlcenter.WithEstimatedTDEE(cfg.NutritionEstimatedTDEE),
 	)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,

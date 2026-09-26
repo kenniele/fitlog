@@ -330,7 +330,27 @@ export type Overview = {
   recovery?: SeriesPoint[] | null;
 };
 
+export type BodyFatEstimate = {
+  status: "estimated" | "no_inbody" | "incomplete_inbody" | "no_tdee" | "no_complete_days" | "stale_inbody" | "insufficient_nutrition" | "outside_model";
+  measured_at?: string;
+  from?: string;
+  through?: string;
+  timezone: string;
+  baseline_percent?: number;
+  tdee_kcal: number;
+  total_days: number;
+  observed_days: number;
+  missing_days: number;
+  coverage_percent: number;
+  observed_deficit_kcal?: number;
+  estimated_deficit_kcal?: number;
+  percent?: number;
+  lower_percent?: number;
+  upper_percent?: number;
+};
+
 export type AnalyticsResponse = {
+  body_fat_estimate?: BodyFatEstimate | null;
   metrics?: Record<string, Metric | string | number | null> | null;
   summary?: Record<string, unknown> | null;
   daily?: SeriesPoint[] | null;

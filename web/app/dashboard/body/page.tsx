@@ -19,6 +19,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { daysBetweenISO, formatDate, formatNumber } from "@/lib/format";
 import { comparisonSummaryMetrics, summaryToMetrics } from "@/lib/metrics";
 import { InBodyAnalysis } from "@/components/body/inbody-analysis";
+import { BodyFatEstimateCard } from "@/components/body/body-fat-estimate";
 import { BodyHistory, bodyHistoryPath, type BodyHistoryScope } from "@/components/body/body-history";
 
 function BodyContent() {
@@ -56,11 +57,12 @@ function BodyContent() {
     : null;
 
   return <>
-    <PageHeader eyebrow="Body" title="Состав тела и InBody" description="Вес, мышцы, жир, вода, висцеральный жир и сегментарный баланс — только по сохранённым измерениям." actions={<Button variant="primary" onClick={() => { setEditing(null); setForm(true); }}><Plus className="size-4" />Добавить InBody</Button>} />
+    <PageHeader eyebrow="Body" title="Состав тела и InBody" description="История измерений состава тела и ориентировочная оценка жира по питанию после последнего InBody." actions={<Button variant="primary" onClick={() => { setEditing(null); setForm(true); }}><Plus className="size-4" />Добавить InBody</Button>} />
     <MetricGrid metrics={analytics.data.comparison ? comparisonSummaryMetrics(analytics.data.summary, analytics.data.comparison) : summaryToMetrics(analytics.data.summary)} order={[{ key: "weight", label: "Вес" }, { key: "body_fat", label: "Жир" }, { key: "skeletal_muscle_mass", label: "Скелетные мышцы" }, { key: "inbody_score", label: "InBody Score" }]} />
     <Card className="p-4"><p className="text-xs text-muted">Средняя скорость по 7-дневному весу</p><p className="mt-2 text-2xl font-semibold">{formatNumber(weeklyRate, { maximumFractionDigits: 2 }, " кг/нед")}</p><p className="mt-1 text-xs text-muted">{weeklyRate === null ? "Нужно минимум две полные 7-дневные точки." : `Расчёт по периоду ${formatDate(first?.date)} — ${formatDate(last?.date)}; это описание истории, не прогноз.`}</p></Card>
     <BodyHistory data={measurements.data} scope={historyScope} page={page} fetching={measurements.isFetching} onScopeChange={(scope) => { setHistoryScope(scope); setPage(1); }} onPageChange={setPage} onEdit={(entry) => { setEditing(entry); setForm(true); }} onDelete={setDeleting} />
     <InBodyAnalysis latest={latestInBody} previous={previousInBody} />
+    <BodyFatEstimateCard estimate={analytics.data.body_fat_estimate} />
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
       <TrendChart title="Вес и 7-дневное среднее" description="Rolling average появляется только для полного окна наблюдений." data={daily} series={[{ key: "weight_kg", label: "Вес" }, { key: "weight_7d_average", label: "Среднее 7д", color: "var(--accent-blue)" }]} />
       <TrendChart title="Жировая и безжировая масса" data={daily} series={[{ key: "fat_mass_kg", label: "Жировая масса", color: "var(--warning)" }, { key: "lean_mass_kg", label: "Безжировая", color: "var(--accent)" }, { key: "skeletal_muscle_mass_kg", label: "Скелетные мышцы", color: "var(--accent-blue)" }]} />

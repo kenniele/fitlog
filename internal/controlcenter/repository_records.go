@@ -169,13 +169,17 @@ func (r *PostgresRepository) listRecords(
 	default:
 		return nil, 0, ErrNotFound
 	}
+	orderExpression := dateExpression
+	if resource == "body-measurements" {
+		orderExpression = "measured_at"
+	}
 	// Table/expression values are selected exclusively from the closed switch.
 	query := fmt.Sprintf(`SELECT %s FROM %s WHERE owner_id=$1
 		AND ($2::date IS NULL OR %s >= $2::date)
 		AND ($3::date IS NULL OR %s <= $3::date)
 		AND ($4::text = '' OR source = $4)
 		AND $5::text <> ''
-		ORDER BY %s DESC, id DESC LIMIT $6 OFFSET $7`, expression, table, dateExpression, dateExpression, dateExpression)
+		ORDER BY %s DESC, id DESC LIMIT $6 OFFSET $7`, expression, table, dateExpression, dateExpression, orderExpression)
 	rows, err := r.pool.Query(ctx, query, ownerID, from, to, options.Filters["source"], loc.String(), options.PageSize, offset)
 	if err != nil {
 		return nil, 0, err

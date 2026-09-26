@@ -31,6 +31,9 @@ type stateRepository struct {
 	override                  ExerciseOverride
 	finishCalled              bool
 	prioritizedExerciseID     int64
+	replacedSessionExerciseID int64
+	replacementOwnerID        int64
+	sessionReplacementErr     error
 }
 
 func (r *stateRepository) GetUIState(context.Context, int64) (UIState, error) {
@@ -163,6 +166,41 @@ func (r *stateRepository) OverrideCurrentExercise(_ context.Context, _ int64, ov
 	exercise.Overridden = true
 	r.activeSession = session
 	return session, nil
+}
+
+func (r *stateRepository) ReplaceCurrentExercise(_ context.Context, ownerID, exerciseID, targetID int64) (Session, error) {
+	r.replacementOwnerID = ownerID
+	r.replacedSessionExerciseID = exerciseID
+	r.replacementTargetID = &targetID
+	return r.activeSession, r.sessionReplacementErr
+}
+
+func TestReplaceCurrentExerciseClearsPendingInputOnlyOnSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "success"},
+		{name: "recorded sets", err: ErrExerciseHasSets},
+		{name: "stale exercise", err: ErrNotEditable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := UIState{OwnerID: 42, Mode: InputRIR, PendingSet: &PendingSet{}}
+			repo := &stateRepository{state: state, activeSession: Session{ID: 7}, sessionReplacementErr: tc.err}
+			session, err := NewUseCase(repo).ReplaceCurrentExercise(context.Background(), 42, 11, 22)
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, int64(42), repo.replacementOwnerID)
+			require.Equal(t, int64(11), repo.replacedSessionExerciseID)
+			require.Equal(t, int64(22), *repo.replacementTargetID)
+			if tc.err != nil {
+				require.Equal(t, state, repo.state)
+			} else {
+				require.Equal(t, int64(7), session.ID)
+				require.Equal(t, InputNone, repo.state.Mode)
+				require.Nil(t, repo.state.PendingSet)
+			}
+		})
+	}
 }
 
 func TestOpenControlMessageStartsFreshCard(t *testing.T) {

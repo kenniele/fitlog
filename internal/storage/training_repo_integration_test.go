@@ -342,6 +342,105 @@ func TestTrainingRepo_PrioritizeExerciseIntegration(t *testing.T) {
 	require.ErrorIs(t, err, training.ErrNotEditable, "a completed exercise cannot be moved back into the active queue")
 }
 
+func TestTrainingRepo_ReplaceCurrentExerciseIntegration(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping integration test")
+	}
+	ctx := context.Background()
+	pool, err := NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+	const ownerID int64 = 987654329
+	cleanup := func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM training_sessions WHERE owner_id IN ($1, $2)`, ownerID, ownerID+1)
+		_, _ = pool.Exec(ctx, `DELETE FROM training_programs WHERE owner_id IN ($1, $2)`, ownerID, ownerID+1)
+		_, _ = pool.Exec(ctx, `DELETE FROM training_exercises WHERE owner_id IN ($1, $2)`, ownerID, ownerID+1)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	repo := NewTrainingRepo(pool)
+	weight := 60.0
+	require.NoError(t, repo.ReplacePrograms(ctx, ownerID, []training.ProgramInput{{
+		Name: "Замена", Exercises: []string{"Жим", "Тяга"},
+		Prescriptions: []training.ExercisePrescription{
+			{WorkingSets: 3, Reps: training.RepRange{Min: 8, Max: 12}, TargetRIR: 2,
+				WeightStepKG: 2.5, StartingWeight: &weight, RestSeconds: 120, AfterSeconds: 180,
+				Progression: training.ProgressionDouble, Warmup: []training.WarmupSet{{WeightKG: &weight, Reps: 10}}},
+			{},
+		},
+	}}))
+	programs, err := repo.ListPrograms(ctx, ownerID)
+	require.NoError(t, err)
+	program := programs[0]
+	startedAt := time.Now().Add(-48 * time.Hour)
+	history, err := repo.StartSession(ctx, ownerID, program.ID, startedAt)
+	require.NoError(t, err)
+	history, err = repo.AddSet(ctx, ownerID, training.SetInput{Reps: 10, WeightKG: &weight})
+	require.NoError(t, err)
+	history, err = repo.FinishCurrentExercise(ctx, ownerID, startedAt.Add(time.Minute))
+	require.NoError(t, err)
+	history, err = repo.FinishCurrentExercise(ctx, ownerID, startedAt.Add(2*time.Minute))
+	require.NoError(t, err)
+
+	session, err := repo.StartSession(ctx, ownerID, program.ID, startedAt.Add(24*time.Hour))
+	require.NoError(t, err)
+	sourceID := session.CurrentExercise().ID
+	targetID := *session.Exercises[1].ExerciseID
+	untouched := session.Exercises[1]
+	require.NotEmpty(t, session.CurrentExercise().Warmup)
+	require.True(t, session.CurrentExercise().Structured())
+	_, err = repo.ReplaceCurrentExercise(ctx, ownerID+1, sourceID, targetID)
+	require.ErrorIs(t, err, training.ErrNoActiveSession)
+	_, err = repo.ReplaceCurrentExercise(ctx, ownerID, untouched.ID, targetID)
+	require.ErrorIs(t, err, training.ErrNotEditable)
+	_, err = repo.ReplaceCurrentExercise(ctx, ownerID, sourceID, *session.CurrentExercise().ExerciseID)
+	require.ErrorIs(t, err, training.ErrNotEditable)
+	var foreignID int64
+	require.NoError(t, pool.QueryRow(ctx, `INSERT INTO training_exercises (owner_id,name) VALUES ($1,'Чужое') RETURNING id`, ownerID+1).Scan(&foreignID))
+	_, err = repo.ReplaceCurrentExercise(ctx, ownerID, sourceID, foreignID)
+	require.ErrorIs(t, err, training.ErrNotFound)
+
+	// Untouched dashboard plans can be discarded, but any recorded facts must stay.
+	_, err = pool.Exec(ctx, `INSERT INTO training_sets (session_exercise_id,position,planned_weight_kg,planned_min_reps) VALUES ($1,1,60,10)`, sourceID)
+	require.NoError(t, err)
+	session, err = repo.SetCurrentExerciseNote(ctx, ownerID, "заметка")
+	require.NoError(t, err)
+	session, err = repo.ReplaceCurrentExercise(ctx, ownerID, sourceID, targetID)
+	require.NoError(t, err)
+	current := session.CurrentExercise()
+	require.Equal(t, sourceID, current.ID)
+	require.Equal(t, "Тяга", current.Name)
+	require.Equal(t, targetID, *current.ExerciseID)
+	require.Equal(t, "заметка", current.Note)
+	require.Equal(t, 1, session.CurrentPosition)
+	require.Equal(t, untouched, session.Exercises[1])
+	require.Empty(t, current.Sets)
+	require.Empty(t, current.Warmup)
+	require.Zero(t, current.Plan)
+	require.Zero(t, current.Recommendation)
+	require.False(t, current.Overridden)
+	require.Nil(t, session.RestUntil)
+	unchangedProgram, err := repo.Program(ctx, ownerID, program.ID)
+	require.NoError(t, err)
+	require.Equal(t, program, unchangedProgram)
+	unchangedHistory, err := repo.Session(ctx, ownerID, history.ID)
+	require.NoError(t, err)
+	require.Equal(t, history, unchangedHistory)
+
+	session, err = repo.AddSet(ctx, ownerID, training.SetInput{Type: training.SetTypeWarmup, Reps: 10})
+	require.NoError(t, err)
+	_, err = repo.ReplaceCurrentExercise(ctx, ownerID, sourceID, *program.ExerciseItems[0].ExerciseID)
+	require.ErrorIs(t, err, training.ErrExerciseHasSets)
+	unchangedSession, err := repo.Session(ctx, ownerID, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, session, unchangedSession)
+	session, err = repo.FinishCurrentExercise(ctx, ownerID, time.Now())
+	require.NoError(t, err)
+	_, err = repo.ReplaceCurrentExercise(ctx, ownerID, sourceID, *program.ExerciseItems[0].ExerciseID)
+	require.ErrorIs(t, err, training.ErrNotEditable)
+}
+
 func TestTrainingRepo_ProgramsV1Integration(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {

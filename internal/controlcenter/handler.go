@@ -26,12 +26,12 @@ type apiHandler struct {
 
 // NewHandler builds the Control Center API handler. Its routes are relative to
 // /api/v1 because the server strips that deployment prefix before dispatching.
-func NewHandler(store Store, ownerID int64, token string, loc *time.Location) http.Handler {
+func NewHandler(store Store, ownerID int64, token string, loc *time.Location, options ...ServiceOption) http.Handler {
 	if loc == nil {
 		loc = time.UTC
 	}
 	handler := &apiHandler{
-		service: NewService(store, ownerID, loc),
+		service: NewService(store, ownerID, loc, options...),
 		auth:    newAuthenticator(ownerID, token),
 		loc:     loc,
 		now:     time.Now,
@@ -40,8 +40,8 @@ func NewHandler(store Store, ownerID int64, token string, loc *time.Location) ht
 }
 
 // NewHTTPHandler is an explicit alias for integrations that use that naming.
-func NewHTTPHandler(store Store, ownerID int64, token string, loc *time.Location) http.Handler {
-	return NewHandler(store, ownerID, token, loc)
+func NewHTTPHandler(store Store, ownerID int64, token string, loc *time.Location, options ...ServiceOption) http.Handler {
+	return NewHandler(store, ownerID, token, loc, options...)
 }
 
 func (h *apiHandler) routes() http.Handler {
