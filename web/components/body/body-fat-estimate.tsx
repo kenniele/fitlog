@@ -30,7 +30,7 @@ export function BodyFatEstimateCard({ estimate }: { estimate?: Estimate | null }
       <p className="mt-4 text-3xl font-semibold tabular-nums text-ink" aria-label="Расчётный процент жира">≈{formatNumber(estimate.percent, { maximumFractionDigits: 1 })}<span className="ml-1 text-lg text-muted">%</span></p>
       {change !== null && <p className="mt-1 text-sm text-ink">Изменение от InBody: {formatNumber(change, { maximumFractionDigits: 1, signDisplay: "exceptZero" })} п.п. по расчёту.</p>}
       <p className="mt-1 text-sm text-muted">Ориентир по последнему InBody, текущему TDEE и дневнику питания. Фактический процент может отличаться.</p>
-      <div className="mt-4 grid gap-3 rounded-control border border-line bg-white/[.025] p-3 sm:grid-cols-3">
+      <div className="mt-4 grid gap-3 rounded-control border border-line bg-ink/[.025] p-3 sm:grid-cols-3">
         <div><p className="text-xs text-muted">Отправная точка</p><p className="mt-1 text-sm font-medium">{formatNumber(estimate.baseline_percent, { maximumFractionDigits: 1 })}% · InBody {formatDate(estimate.measured_at, "dd.MM.yyyy", estimate.timezone)}</p></div>
         <div><p className="text-xs text-muted">{typeof deficit === "number" && deficit < 0 ? "Накопленный профицит" : "Накопленный дефицит"}{estimate.missing_days > 0 ? " · оценка" : ""}</p><p className="mt-1 text-sm font-medium">{formatNumber(typeof deficit === "number" ? Math.abs(deficit) : null, { maximumFractionDigits: 0 })} ккал</p></div>
         <div><p className="text-xs text-muted">Суточный расход TDEE</p><p className="mt-1 text-sm font-medium">{formatNumber(estimate.tdee_kcal, { maximumFractionDigits: 0 })} ккал</p></div>

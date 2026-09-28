@@ -35,7 +35,7 @@ function sourceLabel(source?: string | null) {
   case "manual": return "Вручную";
   case "csv": return "CSV";
   case "json": return "JSON";
-  default: return source || "—";
+  default: return source || "Без данных";
   }
 }
 
@@ -57,7 +57,7 @@ function DetailGroup({ title, items }: { title: string; items: Detail[] }) {
 function SegmentTable({ segments }: { segments?: BodySegment[] | null }) {
   if (!segments?.length) return <p className="text-sm text-muted">Сегментарные показатели не заполнены.</p>;
   return <div className="overflow-x-auto rounded-control border border-line"><table className="w-full min-w-[620px] border-collapse text-left text-sm">
-    <thead><tr className="border-b border-line bg-white/[.025] text-[11px] uppercase tracking-wide text-muted"><th className="px-3 py-2">Сегмент</th><th className="px-3 py-2">Lean, кг</th><th className="px-3 py-2">Lean, %</th><th className="px-3 py-2">Fat, кг</th><th className="px-3 py-2">Fat, %</th></tr></thead>
+    <thead><tr className="border-b border-line bg-ink/[.025] text-[11px] uppercase tracking-wide text-muted"><th className="px-3 py-2">Сегмент</th><th className="px-3 py-2">Lean, кг</th><th className="px-3 py-2">Lean, %</th><th className="px-3 py-2">Fat, кг</th><th className="px-3 py-2">Fat, %</th></tr></thead>
     <tbody>{segments.map((segment) => <tr key={segment.segment} className="border-b border-line/70 last:border-0"><td className="px-3 py-2 font-medium text-ink">{segmentLabels[segment.segment] ?? segment.segment}</td><td className="px-3 py-2">{value(segment.lean_mass_kg, " кг", 2)}</td><td className="px-3 py-2">{value(segment.lean_percent, "%")}</td><td className="px-3 py-2">{value(segment.fat_mass_kg, " кг", 2)}</td><td className="px-3 py-2">{value(segment.fat_percent, "%")}</td></tr>)}</tbody>
   </table></div>;
 }

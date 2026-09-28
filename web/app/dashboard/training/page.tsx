@@ -129,7 +129,7 @@ function TrainingContent() {
   const columns = useMemo<ColumnDef<WorkoutSession>[]>(() => [
     { accessorKey: "date", header: "Дата", cell: ({ row }) => <span>{formatDate(row.original.date ?? row.original.started_at)}</span> },
     { accessorKey: "template_name", header: "Шаблон", cell: ({ row }) => <span className="font-medium">{row.original.template_name ?? row.original.plan_name ?? "Без плана"}</span> },
-    { accessorKey: "status", header: "Статус", cell: ({ getValue }) => <Badge tone={getValue() === "finished" ? "good" : "neutral"}>{String(getValue() ?? "—")}</Badge> },
+    { accessorKey: "status", header: "Статус", cell: ({ getValue }) => <Badge tone={getValue() === "finished" ? "good" : "neutral"}>{String(getValue() ?? "Без данных")}</Badge> },
     { accessorKey: "working_sets", header: "Раб. подходы", cell: ({ getValue }) => formatNumber(getValue<number | null>()) },
     { accessorKey: "volume_kg", header: "Объём", cell: ({ getValue }) => formatNumber(getValue<number | null>(), {}, " кг") },
     { accessorKey: "duration_seconds", header: "Длительность", cell: ({ getValue }) => formatDuration(getValue<number | null>()) },
@@ -143,13 +143,13 @@ function TrainingContent() {
 
   return (
     <>
-      <PageHeader eyebrow="Training" title="Тренировки и прогрессия" description="Сессии, рабочий объём и сила внутри конкретных упражнений." actions={<><TrainingExport filters={exportFilters} /><Button variant="primary" onClick={openNew}><Plus className="size-4" />Тренировка</Button></>} />
+      <PageHeader eyebrow="Тренировки" title="Тренировки и прогрессия" description="Сессии, рабочий объём и сила внутри конкретных упражнений." actions={<><TrainingExport filters={exportFilters} /><Button variant="primary" onClick={openNew}><Plus className="size-4" />Тренировка</Button></>} />
       <MetricGrid metrics={analytics.data?.comparison ? comparisonSummaryMetrics(analytics.data.summary, analytics.data.comparison) : summaryToMetrics(analytics.data?.summary)} />
       <TrainingStreakCards streak={analytics.data?.streak} />
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
         <TrendChart title="Недельный объём" description="Завершённые working/drop-подходы, сгруппированные по сохранённому началу недели." data={analytics.data?.weekly} series={[{ key: "volume_kg", label: "Объём, кг" }]} variant="bar" />
         <TrendChart title="Длительность по дням" description="Суммарное фактическое время завершённых сессий, сгруппированное по локальной дате старта." data={analytics.data?.daily_duration} series={[{ key: "duration_minutes", label: "Минуты" }]} variant="area" />
-        <TrendChart title={exercise ? "Estimated 1RM" : "Рабочие подходы"} description={exercise ? "Epley только для выбранного упражнения и подходов на 1–12 повторов." : "Выберите упражнение ниже, чтобы увидеть реальную серию estimated 1RM."} data={analytics.data?.daily} series={[{ key: exercise ? "estimated_1rm" : "working_sets", label: exercise ? "e1RM" : "Рабочие подходы" }]} />
+        <TrendChart title={exercise ? "Расчётный 1ПМ" : "Рабочие подходы"} description={exercise ? "Epley только для выбранного упражнения и подходов на 1–12 повторов." : "Выберите упражнение ниже, чтобы увидеть реальную серию estimated 1RM."} data={analytics.data?.daily} series={[{ key: exercise ? "estimated_1rm" : "working_sets", label: exercise ? "e1RM" : "Рабочие подходы" }]} />
         <TrendChart title="План и выполнение" description="План привязан к scheduled_at; перенос фактического старта на другую дату не меняет день плана." data={analytics.data?.adherence} series={[{ key: "planned", label: "Запланировано" }, { key: "completed", label: "Выполнено", color: "var(--accent-blue)" }]} variant="bar" />
       </div>
       <ActivityHeatmap data={analytics.data?.heatmap} />

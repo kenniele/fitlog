@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
-import { ErrorState, InlineError, PageSkeleton } from "@/components/ui/states";
+import { EmptyState, ErrorState, InlineError, PageSkeleton } from "@/components/ui/states";
 import { ExerciseForm, PlanForm } from "@/components/forms/plan-forms";
 import { WeeklyScheduleDialog } from "@/components/forms/weekly-schedule-dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -37,7 +37,7 @@ function PlansContent() {
   const remove = useMutation({ mutationFn: (target: NonNullable<typeof deleting>) => apiFetch(`/${target.kind}/${target.id}`, { method: "DELETE" }), onSuccess: async () => { setDeleting(null); await client.invalidateQueries(); } });
   const columns = useMemo<ColumnDef<Exercise>[]>(() => [
     { accessorKey: "name", header: "Упражнение", cell: ({ getValue }) => <span className="font-medium">{String(getValue())}</span> },
-    { accessorKey: "muscle_groups", header: "Мышечные группы", cell: ({ getValue }) => <div className="flex flex-wrap gap-1">{Array.isArray(getValue()) && (getValue() as string[]).length ? (getValue() as string[]).map((group) => <Badge key={group}>{group}</Badge>) : "—"}</div> },
+    { accessorKey: "muscle_groups", header: "Мышечные группы", cell: ({ getValue }) => <div className="flex flex-wrap gap-1">{Array.isArray(getValue()) && (getValue() as string[]).length ? (getValue() as string[]).map((group) => <Badge key={group}>{group}</Badge>) : "Без данных"}</div> },
     { id: "actions", header: "", cell: ({ row }) => <div className="flex justify-end gap-1"><Button variant="ghost" size="icon" aria-label="Редактировать" onClick={() => { setEditingExercise(row.original); setExerciseForm(true); }}><Pencil className="size-4" /></Button><Button variant="ghost" size="icon" aria-label="Удалить" onClick={() => setDeleting({ kind: "exercises", id: row.original.id, name: row.original.name })}><Trash2 className="size-4" /></Button></div> },
   ], []);
 
@@ -46,9 +46,10 @@ function PlansContent() {
 
   return (
     <>
-      <PageHeader eyebrow="Plans" title="Планы, шаблоны и упражнения" description="Версионируемые планы, prescription и расписание на общей тренировочной модели." actions={<><Button onClick={() => { setEditingExercise(null); setExerciseForm(true); }}><Plus className="size-4" />Упражнение</Button><Button variant="primary" onClick={open}><Plus className="size-4" />План</Button></>} />
+      <PageHeader eyebrow="Программы" title="Планы, шаблоны и упражнения" description="Ваши тренировочные программы, упражнения и недельное расписание." actions={<><Button onClick={() => { setEditingExercise(null); setExerciseForm(true); }}><Plus className="size-4" />Упражнение</Button><Button variant="primary" onClick={open}><Plus className="size-4" />План</Button></>} />
       <section>
-        <SectionHeader title="Тренировочные планы" description="Порядок, разминка, шаг веса и отдых сохраняются в active revision; расписание создаёт реальную scheduled session." className="mb-3" />
+        <SectionHeader title="Тренировочные планы" description="Задайте порядок упражнений, разминку, рабочие веса и отдых." className="mb-3" />
+        {!listItems(plans.data).length && <EmptyState title="Соберите свою программу" description="Добавьте план с упражнениями, чтобы перенести тренировки в расписание." action={<Button onClick={open}>Создать план</Button>} />}
         <div className="grid gap-3 lg:grid-cols-2">
           {listItems(plans.data).map((plan) => (
             <Card key={plan.id} className="p-5">
@@ -63,7 +64,7 @@ function PlansContent() {
         <Pagination data={plans.data} page={planPage} onPageChange={setPlanPage} disabled={plans.isFetching} />
       </section>
       <Card>
-        <div className="border-b border-line p-4"><SectionHeader title="Справочник упражнений" description="Мышечные группы и metadata сохраняются через API." /></div>
+        <div className="border-b border-line p-4"><SectionHeader title="Справочник упражнений" description="Упражнения и мышечные группы для ваших тренировок." /></div>
         <DataTable data={listItems(exercises.data)} columns={columns} emptyTitle="Справочник пуст" />
         <Pagination data={exercises.data} page={exercisePage} onPageChange={setExercisePage} disabled={exercises.isFetching} />
       </Card>
@@ -71,7 +72,7 @@ function PlansContent() {
       <PlanForm open={planForm} onOpenChange={(value) => { setPlanForm(value); if (!value) setEditingPlan(null); }} plan={editingPlan} />
       <ExerciseForm open={exerciseForm} onOpenChange={(value) => { setExerciseForm(value); if (!value) setEditingExercise(null); }} exercise={editingExercise} />
       <WeeklyScheduleDialog open={Boolean(schedulePlan)} onOpenChange={(value) => { if (!value) setSchedulePlan(null); }} plan={schedulePlan} />
-      <ConfirmDialog open={Boolean(deleting)} onOpenChange={(value) => { if (!value) setDeleting(null); }} title={`Удалить «${deleting?.name ?? ""}»?`} description="Сервер проверит связи и не позволит разрушить историю без явной поддержки этого действия." onConfirm={() => deleting && remove.mutate(deleting)} busy={remove.isPending} error={remove.error} />
+      <ConfirmDialog open={Boolean(deleting)} onOpenChange={(value) => { if (!value) setDeleting(null); }} title={`Удалить «${deleting?.name ?? ""}»?`} description="Удаление возможно, если запись не используется в сохранённой истории." onConfirm={() => deleting && remove.mutate(deleting)} busy={remove.isPending} error={remove.error} />
     </>
   );
 }

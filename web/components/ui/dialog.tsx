@@ -111,13 +111,13 @@ export function Dialog({ open, onOpenChange, title, description, children, class
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
-        className={cn("overflow-y-auto border border-line bg-surface shadow-2xl", placement === "left" ? "h-[100dvh] max-h-none w-[min(86vw,280px)] rounded-none border-y-0 border-l-0" : "max-h-[94vh] w-full rounded-t-[20px] sm:max-w-2xl sm:rounded-card", className)}
+        className={cn("dialog-enter overflow-y-auto overscroll-contain border border-line bg-surface shadow-2xl", placement === "left" ? "h-[100dvh] max-h-none w-[min(86vw,280px)] rounded-none border-y-0 border-l-0" : "max-h-[94dvh] w-full rounded-t-[16px] sm:max-w-2xl sm:rounded-card", className)}
       >
         <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-line bg-surface/95 px-5 py-4 backdrop-blur">
           <div><h2 id={titleId} className="text-base font-semibold text-ink">{title}</h2>{description && <p id={descriptionId} className="mt-1 text-sm text-muted">{description}</p>}</div>
           <Button type="button" variant="ghost" size="icon" aria-label="Закрыть" onClick={() => onOpenChange(false)}><X className="size-4" /></Button>
         </div>
-        <div className={cn("p-5", contentClassName)}>{children}</div>
+        <div className={cn("p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]", contentClassName)}>{children}</div>
       </div>
     </div>,
     document.body,

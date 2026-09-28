@@ -57,13 +57,13 @@ export function daysBetweenISO(left: string, right: string) {
   return Number.isFinite(delta) ? Math.round(delta / 86_400_000) : 0;
 }
 
-export function formatMissing(value: unknown, suffix = "—"): string {
-  if (value === null || value === undefined || value === "" || (typeof value === "number" && Number.isNaN(value))) return "—";
-  return `${String(value)}${suffix === "—" ? "" : suffix}`;
+export function formatMissing(value: unknown, suffix = ""): string {
+  if (value === null || value === undefined || value === "" || (typeof value === "number" && !Number.isFinite(value))) return "Без данных";
+  return `${String(value)}${suffix}`;
 }
 
 export function formatNumber(value: number | null | undefined, options: Intl.NumberFormatOptions = {}, suffix = "") {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  if (value === null || value === undefined || !Number.isFinite(value)) return "Без данных";
   return `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1, ...options }).format(value)}${suffix}`;
 }
 
@@ -72,20 +72,20 @@ export function formatPercent(value: number | null | undefined) {
 }
 
 export function formatDate(value: string | null | undefined, pattern = "dd.MM.yyyy", timeZone = dashboardTimezone) {
-  if (!value) return "—";
+  if (!value) return "Без данных";
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     const [year, month, day] = value.split("-");
     return `${day}.${month}.${year}`;
   }
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
+  if (Number.isNaN(parsed.getTime())) return "Без данных";
   try {
     return new Intl.DateTimeFormat("ru-RU", {
       timeZone, day: "2-digit", month: "2-digit", year: "numeric",
       ...(pattern.includes("HH") ? { hour: "2-digit", minute: "2-digit", hourCycle: "h23" as const } : {}),
     }).format(parsed).replace(",", "");
   } catch {
-    return "—";
+    return "Без данных";
   }
 }
 
@@ -95,13 +95,14 @@ export function toDateTimeLocal(value: string | null | undefined, timeZone = das
 }
 
 export function formatDuration(seconds: number | null | undefined) {
-  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "—";
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.round((seconds % 3600) / 60);
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "Без данных";
+  const totalMinutes = Math.round(Math.abs(seconds) / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
   return hours > 0 ? `${hours} ч ${minutes} мин` : `${minutes} мин`;
 }
 
 export function signedDelta(value: number | null | undefined, suffix = "") {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  if (value === null || value === undefined || !Number.isFinite(value)) return "Без данных";
   return `${value > 0 ? "+" : ""}${formatNumber(value)}${suffix}`;
 }

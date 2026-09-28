@@ -4,8 +4,8 @@ import { dateInTimeZone, formatMissing, setDashboardTimezone, toDateTimeLocal } 
 afterEach(() => setDashboardTimezone("UTC"));
 
 describe("formatMissing", () => {
-  it.each([null, undefined, "", Number.NaN])("renders missing input %s as an em dash", (value) => {
-    expect(formatMissing(value)).toBe("—");
+  it.each([null, undefined, "", Number.NaN])("renders missing input %s as localized missing data", (value) => {
+    expect(formatMissing(value)).toBe("Без данных");
   });
 
   it("keeps zero instead of treating it as missing", () => {

@@ -1,6 +1,6 @@
 # FitLog Control Center
 
-Next.js App Router frontend for the private FitLog dashboard. The application is dark-first, responsive, and uses the existing Go Control Center API without fixture metrics or simulated integrations.
+Next.js App Router frontend for the private FitLog dashboard. The application is responsive, with graphite dark and off-white light themes, and uses the existing Go Control Center API without fixture metrics or simulated integrations.
 
 ## Local development
 
@@ -32,7 +32,7 @@ npm run build
 npm start
 ```
 
-The test suite covers missing-value formatting, API error/empty states, date-range URL switching, and Zod form validation.
+The test suite covers missing-value formatting, API error/empty states, date-range URL switching, Zod form validation, leap years, calendar keyboard navigation, InBody measurement comparison, and partial month-review failures.
 
 ## Routes
 
@@ -54,9 +54,19 @@ The shared shell keeps `range`, `from`, `to`, and optional `compare=1` in the UR
 - Training analytics returns `{ summary, daily, weekly }`; daily volume is `training_volume_kg`, while `estimated_1rm` is meaningful only with an exercise filter.
 - Recovery, nutrition, and body analytics return `{ summary, daily }`. Body daily points already carry `weight_7d_average`; sparse data is never extrapolated.
 - Import preview and execute are stateless JSON requests with `{ data_type, filename, format, content, mapping, source }`. WHOOP and FatSecret are file adapters only. Stable duplicates are skipped by the backend.
-- Source labels display `Connected` only when the API explicitly returns `connected: true`; no sync or disconnect endpoint is assumed.
+- Source labels display `Подключён` only when the API explicitly returns `connected: true`; no sync or disconnect endpoint is assumed.
 - Correlations provide `coefficient`, `sample_size`, `period`, `definition`, and `insufficient_sample`. The UI always states that correlation is non-causal.
 - Plan exercises send both between-set `rest_seconds` and `rest_after_exercise_seconds`.
 - Delete-all uses the exact phrase `DELETE MY DATA`; the delete endpoint clears the auth cookie before the UI navigates to login.
 
-Optional or `null` fields are rendered as an em dash. If the backend adds exercise-history comparison to session detail, it can replace the current honest “not returned by detail API” note.
+Optional or `null` fields are rendered as “Без данных”. If the backend adds exercise-history comparison to session detail, it can replace the current honest “not returned by detail API” note.
+
+## Control Center presentation
+
+The overview is a continuous sequence: today, yearly history, InBody, training, nutrition, month review, and period trends. Its historical URL range applies to the final trends section; the year browser, measurement selection, and calendar month have independent controls.
+
+- `app/globals.css` defines theme, typography, heatmap, spacing, and motion tokens. Reduced-motion preferences disable transitions and entrance motion.
+- `CalendarGrid` is shared by year history and existing detailed calendars. It distinguishes recorded zero, missing history, and future dates; arrow keys navigate without hundreds of tab stops. Phones scroll within the calendar and open day details as a sheet.
+- The InBody SVG is a fixed measurement-navigation diagram. It does not model the user's physique. The timeline and comparison selectors use actual stored measurements, including partial segment data.
+- Monthly totals cover recorded values; averages divide by recorded days, with coverage shown beside each metric. Average comparisons require at least seven observations and 70% coverage in both months. Workout totals compare only complete calendar months.
+- Domain requests render independently. Month-review queries start near the viewport. No production fixtures, new backend contracts, or visualization dependencies are introduced.

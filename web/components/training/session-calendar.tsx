@@ -30,7 +30,7 @@ function sessionTitle(session: WorkoutSession) {
 
 function sessionTime(session: WorkoutSession) {
   const value = session.scheduled_at ?? session.started_at;
-  return value ? toDateTimeLocal(value).slice(11, 16) || "—" : "—";
+  return value ? toDateTimeLocal(value).slice(11, 16) || "Без данных" : "Без данных";
 }
 
 function sessionCountLabel(count: number) {
@@ -58,12 +58,12 @@ export function SessionCalendar({ from, to, sessions, firstDayOfWeek }: { from: 
     </div>
     <div className="scrollbar-thin overflow-x-auto">
       <div className="min-w-[980px]">
-        <div className="grid grid-cols-7 border-b border-line bg-white/[.018]">{weekDayLabels(firstDayOfWeek).map((day) => <div key={day} className="border-r border-line px-3 py-2 text-center text-[11px] font-medium uppercase tracking-[.12em] text-muted last:border-r-0">{day}</div>)}</div>
+        <div className="grid grid-cols-7 border-b border-line bg-ink/[.018]">{weekDayLabels(firstDayOfWeek).map((day) => <div key={day} className="border-r border-line px-3 py-2 text-center text-[11px] font-medium uppercase tracking-[.12em] text-muted last:border-r-0">{day}</div>)}</div>
         <div className="grid grid-cols-7">
           {dates.map((date, index) => {
             if (!date) return <div key={`padding-${index}`} aria-hidden className="min-h-36 border-b border-r border-line bg-canvas/20" />;
             const daySessions = grouped.get(date) ?? [];
-            return <div key={date} className="min-h-36 border-b border-r border-line bg-surface p-2.5 transition hover:bg-white/[.018]">
+            return <div key={date} className="min-h-36 border-b border-r border-line bg-surface p-2.5 transition hover:bg-ink/[.018]">
               <div className="mb-2 flex items-center justify-between gap-2"><span className="text-xs font-semibold text-ink">{formatDate(date)}</span>{daySessions.length > 0 ? <span className="text-[10px] tabular-nums text-muted">{daySessions.length}</span> : null}</div>
               <div className="space-y-1.5">
                 {daySessions.map((session) => {

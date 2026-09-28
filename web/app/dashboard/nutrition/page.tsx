@@ -50,7 +50,7 @@ function NutritionContent() {
     { accessorKey: "carbohydrates_g", header: "Углеводы", cell: ({ getValue }) => formatNumber(getValue<number | null>(), {}, " г") },
     { accessorKey: "fiber_g", header: "Клетчатка", cell: ({ getValue }) => formatNumber(getValue<number | null>(), {}, " г") },
     { accessorKey: "water_ml", header: "Вода", cell: ({ getValue }) => formatNumber(getValue<number | null>(), {}, " мл") },
-    { accessorKey: "source", header: "Источник", cell: ({ getValue }) => <Badge>{String(getValue() ?? "—")}</Badge> },
+    { accessorKey: "source", header: "Источник", cell: ({ getValue }) => <Badge>{String(getValue() ?? "Без данных")}</Badge> },
     { id: "actions", header: "", cell: ({ row }) => <div className="flex justify-end gap-1"><Button variant="ghost" size="icon" aria-label="Редактировать питание" onClick={() => { setEditing(row.original); setForm(true); }}><Pencil className="size-4" /></Button><Button variant="ghost" size="icon" aria-label="Удалить питание" onClick={() => setDeleting(row.original)}><Trash2 className="size-4" /></Button></div> },
   ], []);
 
@@ -83,11 +83,11 @@ function NutritionContent() {
   ].filter(Boolean).join(", ");
 
   return <>
-    <PageHeader eyebrow="Nutrition" title="Питание относительно целей" description="Дневные итоги, цели, недельные средние и соблюдение диапазона без фиктивной базы продуктов." actions={<><Link href="/dashboard/imports?action=new" className="inline-flex h-10 items-center gap-2 rounded-control border border-line bg-elevated px-4 text-sm font-medium text-ink transition hover:border-white/15"><FileUp className="size-4" />Импорт</Link><Button variant="primary" onClick={() => { setEditing(null); setForm(true); }}><Plus className="size-4" />Дневной итог</Button></>} />
+    <PageHeader eyebrow="Питание" title="Питание относительно целей" description="Дневные итоги, цели, недельные средние и соблюдение диапазона по сохранённым записям." actions={<><Link href="/dashboard/imports?action=new" className="inline-flex h-10 items-center gap-2 rounded-control border border-line bg-elevated px-4 text-sm font-medium text-ink transition hover:border-ink/15"><FileUp className="size-4" />Импорт</Link><Button variant="primary" onClick={() => { setEditing(null); setForm(true); }}><Plus className="size-4" />Дневной итог</Button></>} />
     <MetricGrid metrics={analytics.data.comparison ? comparisonSummaryMetrics(analytics.data.summary, analytics.data.comparison) : summaryToMetrics(analytics.data.summary)} />
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
       <TrendChart title="Калории относительно цели" description={target ? `Сохранённая цель: ${formatNumber(target)} ккал; целевой коридор аналитики — 90–110%.` : "Цель не задана: график показывает только фактическое потребление."} data={daily} series={[{ key: "calories_kcal", label: "Калории" }, { key: "calorie_target_kcal", label: "Цель", color: "var(--warning)" }]} />
-      <TrendChart title="Макронутриенты относительно целей" description={macroTargetDescription ? `Пунктиром показаны сохранённые цели: ${macroTargetDescription}.` : "Задайте цели по белкам, жирам и углеводам в Settings, чтобы видеть отклонения."} data={daily} series={[{ key: "protein_g", label: "Белки", color: "var(--accent)" }, { key: "protein_target_g", label: "Цель белков", color: "var(--accent)", strokeDasharray: "5 4" }, { key: "fat_g", label: "Жиры", color: "var(--warning)" }, { key: "fat_target_g", label: "Цель жиров", color: "var(--warning)", strokeDasharray: "5 4" }, { key: "carbohydrates_g", label: "Углеводы", color: "var(--accent-blue)" }, { key: "carbohydrates_target_g", label: "Цель углеводов", color: "var(--accent-blue)", strokeDasharray: "5 4" }]} />
+      <TrendChart title="Макронутриенты относительно целей" description={macroTargetDescription ? `Пунктиром показаны сохранённые цели: ${macroTargetDescription}.` : "Задайте цели по белкам, жирам и углеводам в настройках, чтобы видеть отклонения."} data={daily} series={[{ key: "protein_g", label: "Белки", color: "var(--accent)" }, { key: "protein_target_g", label: "Цель белков", color: "var(--accent)", strokeDasharray: "5 4" }, { key: "fat_g", label: "Жиры", color: "var(--warning)" }, { key: "fat_target_g", label: "Цель жиров", color: "var(--warning)", strokeDasharray: "5 4" }, { key: "carbohydrates_g", label: "Углеводы", color: "var(--accent-blue)" }, { key: "carbohydrates_target_g", label: "Цель углеводов", color: "var(--accent-blue)", strokeDasharray: "5 4" }]} />
       <TrendChart title="Недельные средние" description="Каждая точка — среднее только по имеющимся дневным записям недели с сохранённым первым днём." data={weekly} series={[{ key: "calories_kcal", label: "Калории" }, { key: "protein_g", label: "Белок", color: "var(--accent-blue)" }, { key: "fat_g", label: "Жиры", color: "var(--warning)" }, { key: "carbohydrates_g", label: "Углеводы", color: "var(--critical)" }]} />
       <MetricSwitcherChart title="Дополнительные нутриенты" data={daily} metrics={[
         { key: "sugar_g", label: "Сахар", variant: "bar" },
@@ -97,7 +97,7 @@ function NutritionContent() {
         { key: "water_ml", label: "Вода", variant: "area" },
         { key: "fiber_g", label: "Клетчатка", variant: "bar" },
       ]} />
-      <CalendarHeatmap title="Соблюдение калорийной цели" description={target ? "100% означает точное попадание; насыщенность снижается с отклонением от цели." : "Задайте калорийную цель в Settings, чтобы рассчитать соблюдение."} data={target ? daily : []} dataKey="target_adherence_percent" unit="%" />
+      <CalendarHeatmap title="Соблюдение калорийной цели" description={target ? "100% означает точное попадание; насыщенность снижается с отклонением от цели." : "Задайте калорийную цель в настройках, чтобы рассчитать соблюдение."} data={target ? daily : []} dataKey="target_adherence_percent" unit="%" />
     </div>
     <Card><DataTable data={listItems(days.data)} columns={columns} emptyTitle="Нет дневных итогов" /><Pagination data={days.data} page={page} onPageChange={setPage} disabled={days.isFetching} /></Card>
     <NutritionForm open={form} onOpenChange={(value) => { setForm(value); if (!value) setEditing(null); }} entry={editing} />
