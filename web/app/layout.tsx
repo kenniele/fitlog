@@ -5,6 +5,9 @@ import { Providers } from "./providers";
 export const metadata: Metadata = {
   title: { default: "FitLog Control Center", template: "%s · FitLog" },
   description: "Персональный центр тренировок, восстановления, питания и состава тела.",
+  applicationName: "FitLog",
+  appleWebApp: { capable: true, title: "FitLog", statusBarStyle: "default" },
+  icons: { icon: "/icons/fitlog.svg", apple: "/icons/apple-touch-icon.png" },
 };
 
 export const viewport: Viewport = { colorScheme: "dark light", themeColor: [{ media: "(prefers-color-scheme: dark)", color: "#0d1110" }, { media: "(prefers-color-scheme: light)", color: "#f5f6f2" }], width: "device-width", initialScale: 1 };

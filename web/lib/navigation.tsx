@@ -1,7 +1,8 @@
-import { Activity, Apple, BarChart3, CalendarRange, Database, Dumbbell, LayoutDashboard, Ruler, Settings2 } from "lucide-react";
+import { Activity, Apple, BarChart3, CalendarRange, Database, Dumbbell, LayoutDashboard, Ruler, Settings2, PanelsTopLeft } from "lucide-react";
 
 export const navigation = [
   { href: "/dashboard", label: "Обзор", icon: LayoutDashboard, exact: true },
+  { href: "/dashboard/summary", label: "Сводка", icon: PanelsTopLeft },
   { href: "/dashboard/training", label: "Тренировки", icon: Dumbbell },
   { href: "/dashboard/recovery", label: "Восстановление", icon: Activity },
   { href: "/dashboard/nutrition", label: "Питание", icon: Apple },

@@ -103,6 +103,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const current = navigation.find((item) =>
     item.exact ? pathname === item.href : pathname.startsWith(item.href),
   );
+  if (pathname === "/dashboard/summary") {
+    return <AuthBoundary>{children}</AuthBoundary>;
+  }
   const navigationContent = (
     <>
       <nav

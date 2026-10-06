@@ -45,6 +45,14 @@ automatically and do not belong in the web callback allowlist.
 
 ## FitLog Control Center
 
+The compact numeric summary at `/dashboard/summary` can be added to the iPhone
+Home Screen or the Mac Dock from Safari. It opens as a standalone web app and
+uses the existing dashboard login; no Apple Developer account is needed. See
+[web app setup](docs/web-app.md). The Training page includes a minimal exercise
+progress chart for 4 or 12 weeks.
+For numeric Home Screen widgets, download the included Scriptable script and
+create a widget-only key on the Summary page: [step-by-step setup](docs/scriptable.md).
+
 The optional Control Center is a single-user web workspace at `/dashboard` for
 training, recovery, sleep, nutrition, body measurements, correlations, plans,
 and file imports. It reuses the Telegram workout tables instead of maintaining

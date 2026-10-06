@@ -52,12 +52,15 @@ func (h *apiHandler) routes() http.Handler {
 	router.Get("/auth/session", h.getSession)
 	router.Post("/auth/session", h.createSession)
 	router.Delete("/auth/session", h.deleteSession)
+	router.With(h.requireWidgetToken, h.useUserLocation).Get("/widget", h.compact)
 
 	router.Group(func(protected chi.Router) {
 		protected.Use(h.requireSession)
 		protected.Use(h.useUserLocation)
+		protected.Post("/auth/widget-token", h.createWidgetToken)
 
 		protected.Get("/dashboard/overview", h.overview)
+		protected.Get("/dashboard/summary", h.compact)
 		for _, kind := range []string{"training", "recovery", "nutrition", "body", "correlations"} {
 			kind := kind
 			protected.Get("/analytics/"+kind, h.analytics(kind))
