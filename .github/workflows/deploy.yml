@@ -77,6 +77,8 @@ jobs:
         with:
           context: .
           file: deployments/Dockerfile.web
+          build-args: |
+            FITLOG_API_INTERNAL_URL=http://fitlog-backend:8080
           push: true
           tags: |
             ${{ env.WEB_IMAGE }}:latest
