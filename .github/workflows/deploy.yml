@@ -5,10 +5,10 @@ on:
     branches: [main]
   workflow_dispatch: {}
 
-# Не запускать два деплоя одновременно; новый push отменяет предыдущий in-flight.
+# Дождаться завершения активного деплоя перед следующим выпуском.
 concurrency:
   group: deploy-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   IMAGE: ghcr.io/kenniele/fitlog
@@ -25,6 +25,9 @@ jobs:
           cache: true
       - run: go vet ./cmd/... ./internal/... ./migrations/...
       - run: go test -race -count=1 ./cmd/... ./internal/... ./migrations/...
+      - run: bash -n deployments/release.sh
+      - run: shellcheck deployments/release.sh
+      - run: python3 -m unittest discover -s deployments -p 'test_*.py'
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -86,36 +89,33 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
+      - uses: actions/checkout@v4
       - name: Deploy over SSH
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           SSH_HOST: ${{ secrets.DEPLOY_HOST }}
           SSH_USER: ${{ secrets.DEPLOY_USER }}
           SSH_PORT: ${{ secrets.DEPLOY_PORT }}
+          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          RELEASE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          PORT="${SSH_PORT:-22}"
-          mkdir -p ~/.ssh
+          port="${SSH_PORT:-22}"
+          root="${DEPLOY_PATH:?set DEPLOY_PATH}"
+          : "${SSH_KEY:?set DEPLOY_SSH_KEY}" "${SSH_HOST:?set DEPLOY_HOST}" "${SSH_USER:?set DEPLOY_USER}" "${SSH_KNOWN_HOSTS:?set verified DEPLOY_KNOWN_HOSTS}"
+          [[ "$root" =~ ^/[a-zA-Z0-9_./-]+$ ]] && [[ "$root" != / ]]
+          [[ "$port" =~ ^[0-9]+$ ]] && [[ "$SSH_USER" =~ ^[a-zA-Z0-9_-]+$ ]]
+          [[ "$SSH_HOST" =~ ^[a-zA-Z0-9.:-]+$ ]]
+          install -m 700 -d ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -p "$PORT" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -i ~/.ssh/id_deploy -p "$PORT" "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          cd ~/fitlog
-          # Жёстко синхронизируемся с origin/main, чтобы локальный дрейф трекаемых
-          # файлов не ломал деплой. .env в .gitignore — reset --hard его не трогает.
-          git fetch origin main
-          git reset --hard origin/main
-          COMPOSE="docker compose --env-file $PWD/.env -f deployments/docker-compose.yml -f deployments/docker-compose.prod.yml"
-          $COMPOSE pull
-          # The image embeds the SQL migrations. Apply them before starting the
-          # new application version so code never runs against an old schema.
-          $COMPOSE up -d --wait --wait-timeout 30 postgres
-          # Do not let the one-off container consume the remaining SSH heredoc.
-          # Without closed stdin, bash reaches EOF here and never recreates app.
-          $COMPOSE run --rm --no-deps -T app migrate </dev/null
-          $COMPOSE up -d --force-recreate app web caddy
-          $COMPOSE logs --tail=20 app web caddy
-          # Старый образ после обновления тега становится dangling — убираем.
-          docker image prune -f || true
-          REMOTE
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_deploy ~/.ssh/known_hosts
+          ssh_options=(-i ~/.ssh/id_deploy -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=20 -o ServerAliveCountMax=3)
+          remote="$SSH_USER@$SSH_HOST"
+          incoming="$root/deploy/releases/$RELEASE_SHA"
+          ssh "${ssh_options[@]}" "$remote" "mkdir -p '$incoming'"
+          scp -i ~/.ssh/id_deploy -P "$port" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            deployments/docker-compose.shared.yml deployments/release.sh "$remote:$incoming/"
+          ssh "${ssh_options[@]}" "$remote" \
+            "bash '$incoming/release.sh' '$root' '$IMAGE:$RELEASE_SHA' '$WEB_IMAGE:$RELEASE_SHA'"

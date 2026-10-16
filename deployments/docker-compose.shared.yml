@@ -1,0 +1,76 @@
+name: fitlog
+
+services:
+  postgres:
+    image: ${FITLOG_POSTGRES_IMAGE:-postgres:16-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fitlog
+      POSTGRES_DB: fitlog
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    networks:
+      database:
+        aliases: [fitlog-db]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U fitlog -d fitlog"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  app:
+    image: ${FITLOG_IMAGE:?set FITLOG_IMAGE to a digest}
+    restart: unless-stopped
+    env_file: ${FITLOG_ENV_FILE:?set absolute FITLOG_ENV_FILE}
+    environment:
+      DATABASE_URL: postgres://fitlog:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@fitlog-db:5432/fitlog?sslmode=disable
+      HTTP_ADDR: :8080
+      OBSIDIAN_ARTICLES_PATH: /vault
+    volumes:
+      - ${OBSIDIAN_ARTICLES_PATH:?set OBSIDIAN_ARTICLES_PATH}:/vault:ro
+    ports:
+      - "127.0.0.1:${FITLOG_HOST_PORT:-18082}:8080"
+    networks:
+      database: {}
+      proxy:
+        aliases: [fitlog-backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 60s
+    healthcheck:
+      test: [CMD, wget, -q, --spider, "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  web:
+    image: ${FITLOG_WEB_IMAGE:?set FITLOG_WEB_IMAGE to a digest}
+    restart: unless-stopped
+    environment:
+      NEXT_TELEMETRY_DISABLED: "1"
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      FITLOG_API_INTERNAL_URL: http://app:8080
+    networks:
+      database: {}
+      proxy:
+        aliases: [fitlog-web]
+    depends_on:
+      app:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+volumes:
+  postgres:
+    name: fitlog_postgres
+networks:
+  database:
+    internal: true
+  proxy:
+    external: true
+    name: ${FITLOG_PROXY_NETWORK:-proxy}
