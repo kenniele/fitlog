@@ -30,7 +30,8 @@ services:
       - "127.0.0.1:${FITLOG_HOST_PORT:-18082}:8080"
     networks:
       database: {}
-      application: {}
+      application:
+        aliases: [fitlog-api]
       edge:
         aliases: [fitlog-backend]
     depends_on:
@@ -53,7 +54,7 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       HOSTNAME: 0.0.0.0
       PORT: 3000
-      FITLOG_API_INTERNAL_URL: http://fitlog-backend:8080
+      FITLOG_API_INTERNAL_URL: http://fitlog-api:8080
     networks:
       application: {}
       edge:

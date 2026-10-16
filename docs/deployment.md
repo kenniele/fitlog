@@ -50,6 +50,7 @@ Telegram polling и WHOOP/FatSecret sync вместе с HTTP. После пер
 Старые standalone compose-файлы не используются для общего сервера.
 
 Сеть `edge-fitlog` создаёт server-infra; другие приложения к ней не подключаются.
-Frontend и backend дополнительно имеют собственную сеть `application`.
+Frontend обращается к `fitlog-api:8080` через собственную сеть `application`;
+этот alias не публикуется в ingress-сети. Caddy использует `fitlog-backend`.
 `FITLOG_PROXY_NETWORK` выбирает внешнюю сеть; по умолчанию `edge-fitlog`.
 Проект не читает конфигурацию Pulse или IMAP и не управляет их сервисами.
