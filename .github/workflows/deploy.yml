@@ -118,6 +118,6 @@ jobs:
           incoming="$root/deploy/releases/$RELEASE_SHA"
           ssh "${ssh_options[@]}" "$remote" "mkdir -p '$incoming'"
           scp -i ~/.ssh/id_deploy -P "$port" -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            deployments/docker-compose.shared.yml deployments/release.sh "$remote:$incoming/"
+            deployments/compose.prod.yml deployments/release.sh "$remote:$incoming/"
           ssh "${ssh_options[@]}" "$remote" \
             "bash '$incoming/release.sh' '$root' '$IMAGE:$RELEASE_SHA' '$WEB_IMAGE:$RELEASE_SHA'"

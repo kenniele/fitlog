@@ -15,7 +15,7 @@ class ReleaseTest(unittest.TestCase):
             release.mkdir(parents=True)
             (root / ".env").write_text("PUBLIC_BASE_URL=https://fitlog.example\n")
             (release / "release.sh").write_text(Path(__file__).with_name("release.sh").read_text())
-            (release / "docker-compose.shared.yml").write_text("services: {}\n")
+            (release / "compose.prod.yml").write_text("services: {}\n")
             bin_dir = root / "bin"
             bin_dir.mkdir()
             log = root / "commands"

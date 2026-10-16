@@ -29,19 +29,21 @@ export FITLOG_IMAGE FITLOG_WEB_IMAGE FITLOG_ENV_FILE="$root/.env"
 FITLOG_IMAGE=$(resolve_image "$app_ref" ghcr.io/kenniele/fitlog)
 FITLOG_WEB_IMAGE=$(resolve_image "$web_ref" ghcr.io/kenniele/fitlog-web)
 compose=(docker compose --project-name fitlog --project-directory "$root"
-  --env-file "$root/.env" -f "$release/docker-compose.shared.yml")
+  --env-file "$root/.env" -f "$release/compose.prod.yml")
 "${compose[@]}" config --quiet
 previous=$(readlink -f "$root/deploy/current" 2>/dev/null || true)
 replaced=false
 rollback() {
-  local status=$?
+  local status=$? previous_compose
   trap - EXIT
   if (( status != 0 )) && [[ "$replaced" == true && -n "$previous" && -f "$previous/app.digest" && -f "$previous/web.digest" ]]; then
     FITLOG_IMAGE=$(cat "$previous/app.digest")
     FITLOG_WEB_IMAGE=$(cat "$previous/web.digest")
     if [[ "$FITLOG_IMAGE" =~ ^ghcr\.io/kenniele/fitlog@sha256:[a-f0-9]{64}$ && "$FITLOG_WEB_IMAGE" =~ ^ghcr\.io/kenniele/fitlog-web@sha256:[a-f0-9]{64}$ ]]; then
+      previous_compose="$previous/compose.prod.yml"
+      [[ -f "$previous_compose" ]] || previous_compose="$previous/docker-compose.shared.yml"
       docker compose --project-name fitlog --project-directory "$root" --env-file "$root/.env" \
-        -f "$previous/docker-compose.shared.yml" up -d --no-deps --no-build app web || true
+        -f "$previous_compose" up -d --no-deps --no-build app web || true
       echo 'Release failed; previous application images requested. Database schema was not rolled back.' >&2
     fi
   fi

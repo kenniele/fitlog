@@ -1,12 +1,12 @@
-# FitLog на общем сервере Pulse
+# Production deployment FitLog
 
 Production-каталог: `/home/deploy/fitlog`, SSH `deploy@148.135.208.115`.
 Домен остаётся `https://fitlog.chickenkiller.com`.
 
-Стек `fitlog` использует `deployments/docker-compose.shared.yml`: отдельную
+Стек `fitlog` использует `deployments/compose.prod.yml`: отдельную
 PostgreSQL 16, volume `fitlog_postgres`, backend и frontend. Caddy управляется
-отдельно в `/home/deploy/pulse-proxy`; release приложения его не пересоздаёт.
-Backend публикует только `127.0.0.1:18082`. В сети `proxy` используются aliases
+отдельным репозиторием `kenniele/server-infra` в `/home/deploy/server-infra`; release приложения его не пересоздаёт.
+Backend публикует только `127.0.0.1:18082`. В выделенной сети `edge-fitlog` используются aliases
 `fitlog-backend` и `fitlog-web`; БД остаётся в закрытой сети.
 
 Операторские команды выполняются в Bash:
@@ -18,7 +18,7 @@ export FITLOG_ENV_FILE="$root/.env"
 export FITLOG_IMAGE=$(cat "$release/app.digest")
 export FITLOG_WEB_IMAGE=$(cat "$release/web.digest")
 compose=(docker compose --project-name fitlog --project-directory "$root"
-  --env-file "$root/.env" -f "$release/docker-compose.shared.yml")
+  --env-file "$root/.env" -f "$release/compose.prod.yml")
 "${compose[@]}" ps
 curl -fsS http://127.0.0.1:18082/healthz
 ```
@@ -48,3 +48,8 @@ Telegram polling и WHOOP/FatSecret sync вместе с HTTP. После пер
 Локальные `backups/pre-release-*.dump` содержат личные данные и не заменяют
 зашифрованную копию вне VPS. Проверка backup включает restore в отдельную БД.
 Старые standalone compose-файлы не используются для общего сервера.
+
+Сеть `edge-fitlog` создаёт server-infra; другие приложения к ней не подключаются.
+Frontend и backend дополнительно имеют собственную сеть `application`.
+`FITLOG_PROXY_NETWORK` выбирает внешнюю сеть; по умолчанию `edge-fitlog`.
+Проект не читает конфигурацию Pulse или IMAP и не управляет их сервисами.
