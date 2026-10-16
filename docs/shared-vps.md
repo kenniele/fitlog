@@ -36,9 +36,9 @@ Runtime-секреты хранятся в `.env` с правами `0600`. `FIT
 позволяет закрепить PostgreSQL по digest. Пароль БД — `POSTGRES_PASSWORD`;
 URL подключения формирует Compose. Не печатайте `compose config` без `--quiet`.
 
-Obsidian vault расположен в `/home/deploy/obsidian-vault`. Приложение получает
-только `Знания/02 Темы` как `/vault:ro`; Git pull запускается отдельно раз в
-10 минут. SSH alias `github-obsidian` использует отдельный read-only deploy key.
+По решению владельца от 16 октября 2026 Obsidian исключён из серверного
+развёртывания. Vault не монтируется, `OBSIDIAN_ARTICLES_PATH` пуст,
+Git-синхронизация статей не запускается.
 
 Для переноса между серверами сначала остановите старый FitLog: он запускает
 Telegram polling и WHOOP/FatSecret sync вместе с HTTP. После первого запуска

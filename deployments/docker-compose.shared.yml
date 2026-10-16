@@ -25,9 +25,7 @@ services:
     environment:
       DATABASE_URL: postgres://fitlog:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@fitlog-db:5432/fitlog?sslmode=disable
       HTTP_ADDR: :8080
-      OBSIDIAN_ARTICLES_PATH: /vault
-    volumes:
-      - ${OBSIDIAN_ARTICLES_PATH:?set OBSIDIAN_ARTICLES_PATH}:/vault:ro
+      OBSIDIAN_ARTICLES_PATH: ""
     ports:
       - "127.0.0.1:${FITLOG_HOST_PORT:-18082}:8080"
     networks:
