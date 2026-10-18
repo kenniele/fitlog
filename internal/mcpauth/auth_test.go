@@ -2,6 +2,7 @@ package mcpauth
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -59,9 +60,7 @@ func (s *memoryStore) Exchange(_ context.Context, e exchange) (string, error) {
 		}
 		g.CodeHash = ""
 		g.access, g.refresh, g.accessExpiry = e.AccessHash, e.RefreshHash, e.AccessExpiresAt
-		if e.Kind == "authorization_code" {
-			g.refreshExpiry = e.RefreshExpiresAt
-		}
+		g.refreshExpiry = e.RefreshExpiresAt
 		return g.Scope, nil
 	}
 	return "", errInvalidGrant
@@ -439,4 +438,64 @@ func TestClientSecretPostAndExpiredCode(t *testing.T) {
 	}
 	store.grants[0].CodeExpiresAt = time.Now().Add(time.Minute)
 	_ = tokens(t, request())
+}
+
+func TestReadConsentIncludesPersistentAccess(t *testing.T) {
+	s, _ := testServer(t)
+	q := authorizeQuery(s)
+	q.Set("scope", ReadScope)
+	page := httptest.NewRecorder()
+	s.Routes().ServeHTTP(page, httptest.NewRequest("GET", s.cfg.BaseURL+"/oauth/mcp/authorize?"+q.Encode(), nil))
+	if page.Code != 200 || !strings.Contains(page.Body.String(), "fitlog:read offline_access</code>") || !strings.Contains(page.Body.String(), "90 дней") {
+		t.Fatal("persistent access is not disclosed before consent")
+	}
+	cookie, csrf := beginConsent(t, s, q)
+	approved := approve(t, s, q, cookie, csrf, s.cfg.LoginToken)
+	if approved.Code != http.StatusSeeOther {
+		t.Fatalf("consent: %d", approved.Code)
+	}
+	redirect, err := url.Parse(approved.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := tokens(t, tokenRequest(s, codeForm(s, redirect.Query().Get("code"))))
+	if result["refresh_token"] == nil || result["scope"] != ReadScope+" offline_access" {
+		t.Fatal("read consent must allow refresh without granting writes")
+	}
+}
+
+func TestRefreshRenewsInactivityDeadline(t *testing.T) {
+	s, store := testServer(t)
+	first := tokens(t, tokenRequest(s, codeForm(s, approvedCode(t, s))))
+	if remaining := time.Until(store.grants[0].refreshExpiry); remaining < 90*24*time.Hour-time.Minute || remaining > 90*24*time.Hour {
+		t.Fatalf("initial refresh lifetime: %v", remaining)
+	}
+	store.grants[0].refreshExpiry = time.Now().Add(time.Hour)
+	refresh := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {first["refresh_token"].(string)}, "resource": {s.resource()}}
+	second := tokens(t, tokenRequest(s, refresh))
+	if remaining := time.Until(store.grants[0].refreshExpiry); remaining < 90*24*time.Hour-time.Minute || remaining > 90*24*time.Hour {
+		t.Fatalf("refreshed lifetime: %v", remaining)
+	}
+	if tokenRequest(s, refresh).Code != http.StatusBadRequest {
+		t.Fatal("refresh replay accepted")
+	}
+	store.grants[0].refreshExpiry = time.Now().Add(-time.Second)
+	refresh.Set("refresh_token", second["refresh_token"].(string))
+	if tokenRequest(s, refresh).Code != http.StatusBadRequest {
+		t.Fatal("expired refresh revived")
+	}
+}
+
+func TestConsentRejectsPreviousPersistencePolicy(t *testing.T) {
+	s, store := testServer(t)
+	q := authorizeQuery(s)
+	q.Set("scope", ReadScope)
+	cookie, _ := beginConsent(t, s, q)
+	mac := hmac.New(sha256.New, []byte(s.cfg.LoginToken))
+	_, _ = mac.Write([]byte(cookie.Value + "\x00" + q.Encode()))
+	oldCSRF := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	w := approve(t, s, q, cookie, oldCSRF, s.cfg.LoginToken)
+	if w.Code != http.StatusForbidden || len(store.grants) != 0 {
+		t.Fatal("old consent page granted newly added persistent access")
+	}
 }

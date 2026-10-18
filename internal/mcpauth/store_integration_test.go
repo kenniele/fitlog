@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -209,5 +210,38 @@ func TestPostgresMCPJournal(t *testing.T) {
 		if w.Code != 200 {
 			t.Fatal(fmt.Sprintf("route %s: %d", path, w.Code))
 		}
+	}
+}
+
+func TestPostgresRefreshRenewsInactivityDeadline(t *testing.T) {
+	s, pool := integrationServer(t)
+	first := tokens(t, tokenRequest(s, codeForm(s, approvedCode(t, s))))
+	var expiry time.Time
+	if err := pool.QueryRow(t.Context(), `SELECT refresh_expires_at FROM mcp_oauth_grants WHERE refresh_hash=$1`, digest(first["refresh_token"].(string))).Scan(&expiry); err != nil {
+		t.Fatal(err)
+	}
+	if remaining := time.Until(expiry); remaining < 90*24*time.Hour-time.Minute || remaining > 90*24*time.Hour {
+		t.Fatalf("initial lifetime: %v", remaining)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE mcp_oauth_grants SET refresh_expires_at=now()+interval '1 hour' WHERE refresh_hash=$1`, digest(first["refresh_token"].(string))); err != nil {
+		t.Fatal(err)
+	}
+	refresh := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {first["refresh_token"].(string)}, "resource": {s.resource()}}
+	second := tokens(t, tokenRequest(s, refresh))
+	if err := pool.QueryRow(t.Context(), `SELECT refresh_expires_at FROM mcp_oauth_grants WHERE refresh_hash=$1`, digest(second["refresh_token"].(string))).Scan(&expiry); err != nil {
+		t.Fatal(err)
+	}
+	if remaining := time.Until(expiry); remaining < 90*24*time.Hour-time.Minute || remaining > 90*24*time.Hour {
+		t.Fatalf("refreshed lifetime: %v", remaining)
+	}
+	if tokenRequest(s, refresh).Code != http.StatusBadRequest {
+		t.Fatal("refresh replay accepted")
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE mcp_oauth_grants SET refresh_expires_at=now()-interval '1 second' WHERE refresh_hash=$1`, digest(second["refresh_token"].(string))); err != nil {
+		t.Fatal(err)
+	}
+	refresh.Set("refresh_token", second["refresh_token"].(string))
+	if tokenRequest(s, refresh).Code != http.StatusBadRequest {
+		t.Fatal("expired refresh revived")
 	}
 }

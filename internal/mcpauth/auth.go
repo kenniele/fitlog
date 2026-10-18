@@ -25,11 +25,12 @@ import (
 )
 
 const (
-	ReadScope   = "fitlog:read"
-	WriteScope  = "fitlog:write"
-	loginCookie = "__Host-fitlog-mcp-csrf"
-	maxBody     = 1 << 20
-	consentCSP  = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
+	ReadScope           = "fitlog:read"
+	WriteScope          = "fitlog:write"
+	loginCookie         = "__Host-fitlog-mcp-csrf"
+	maxBody             = 1 << 20
+	refreshIdleLifetime = 90 * 24 * time.Hour
+	consentCSP          = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
 )
 
 type Config struct {
@@ -213,6 +214,11 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 		oauthError(w, 400, "invalid_scope")
 		return
 	}
+	// Refresh-capable clients may request only the resource's read scope.
+	// Disclose persistent access on the consent page before saving the grant.
+	if client.refresh && !hasScope(scope, "offline_access") {
+		scope += " offline_access"
+	}
 	if r.Method == http.MethodGet {
 		// Chromium also applies form-action to the POST's redirect chain.
 		// The form action is fixed to FitLog, and the callback is validated above.
@@ -372,7 +378,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	}
 	access, refresh := randomToken(), randomToken()
 	scope, err := s.store.Exchange(r.Context(), exchange{Kind: kind, Hash: hash, Binding: s.binding, ClientHash: client.hash, RequestedScope: f.Get("scope"), RedirectURI: f.Get("redirect_uri"), Challenge: challenge,
-		AccessHash: digest(access), RefreshHash: digest(refresh), AccessExpiresAt: time.Now().Add(time.Hour), RefreshExpiresAt: time.Now().Add(30 * 24 * time.Hour)})
+		AccessHash: digest(access), RefreshHash: digest(refresh), AccessExpiresAt: time.Now().Add(time.Hour), RefreshExpiresAt: time.Now().Add(refreshIdleLifetime)})
 	if err != nil {
 		if errors.Is(err, errInvalidGrant) {
 			oauthError(w, 400, "invalid_grant")
@@ -439,12 +445,13 @@ func validVerifier(v string) bool {
 var consentPage = template.Must(template.New("consent").Parse(`<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Подключить FitLog</title>
 <style>body{font:18px system-ui;max-width:640px;margin:8vh auto;padding:24px;color:#192b26;background:#f2f7f4}main{padding:32px;background:white;border-radius:20px}input{box-sizing:border-box;width:100%;padding:12px;margin:12px 0}button{padding:12px 18px;margin:10px 8px 0 0}code{overflow-wrap:anywhere}</style>
 <main><h1>Подключить FitLog</h1><p>Приложение <strong>{{.Client}}</strong> запрашивает доступ к твоему журналу тренировок и здоровья.</p>
-<p>Разрешения: <code>{{.Scope}}</code></p><p><code>fitlog:read</code> — чтение данных; <code>fitlog:write</code> — добавление записей; <code>offline_access</code> — сохранение подключения на срок до 30 дней.</p>
+<p>Разрешения: <code>{{.Scope}}</code></p><p><code>fitlog:read</code> — чтение данных; <code>fitlog:write</code> — добавление записей; <code>offline_access</code> — сохранение подключения с автоматическим продлением. Каждое обновление продлевает доступ на 90 дней; после 90 дней без обновления потребуется повторный вход. Доступ можно отозвать в любой момент.</p>
 <p>После входа ты вернёшься на <code>{{.Redirect}}</code>.</p>
 <form method="post" action="{{.Action}}"><input type="hidden" name="csrf" value="{{.CSRF}}"><label for="login">Ключ подключения FitLog</label><input id="login" name="login_token" type="password" autocomplete="off"><p>Введи ключ только на этой странице FitLog. Не отправляй его в чат.</p><button name="decision" value="allow">Разрешить доступ</button><button name="decision" value="deny">Отмена</button></form></main></html>`))
 
 func (s *Server) consentCSRF(nonce string, query url.Values) string {
 	mac := hmac.New(sha256.New, []byte(s.cfg.LoginToken))
-	_, _ = mac.Write([]byte(nonce + "\x00" + query.Encode()))
+	// Invalidate consent pages rendered before persistent access was disclosed.
+	_, _ = mac.Write([]byte("refresh-idle-90-days\x00" + nonce + "\x00" + query.Encode()))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }

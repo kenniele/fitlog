@@ -56,13 +56,13 @@ func (s *postgresStore) Exchange(ctx context.Context, e exchange) (string, error
    RETURNING scope`, e.Hash, e.Binding, e.RedirectURI, e.Challenge, time.Now(), e.AccessHash, e.AccessExpiresAt, e.RefreshHash, e.RefreshExpiresAt, e.RequestedScope, e.ClientHash).Scan(&scope)
 	case "refresh_token":
 		// One atomic update consumes the old refresh token and invalidates the old
-		// access token. The original refresh expiry is retained across rotations.
+		// access token. Each successful refresh renews the inactivity deadline.
 		err = s.pool.QueryRow(ctx, `UPDATE mcp_oauth_grants SET access_hash=$3,
-   access_expires_at=$4,refresh_hash=$5,scope=CASE WHEN $6='' THEN scope ELSE $6 END
+   access_expires_at=$4,refresh_hash=$5,refresh_expires_at=$8,scope=CASE WHEN $6='' THEN scope ELSE $6 END
    WHERE refresh_hash=$1 AND binding=$2 AND client_hash=$7 AND refresh_expires_at>now()
     AND 'offline_access'=ANY(string_to_array(scope,' '))
 AND ($6='' OR string_to_array($6,' ') <@ string_to_array(scope,' '))
-   RETURNING scope`, e.Hash, e.Binding, e.AccessHash, e.AccessExpiresAt, e.RefreshHash, e.RequestedScope, e.ClientHash).Scan(&scope)
+   RETURNING scope`, e.Hash, e.Binding, e.AccessHash, e.AccessExpiresAt, e.RefreshHash, e.RequestedScope, e.ClientHash, e.RefreshExpiresAt).Scan(&scope)
 	default:
 		return "", errInvalidGrant
 	}
