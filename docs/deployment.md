@@ -54,3 +54,22 @@ Frontend обращается к `fitlog-api:8080` через собственн
 этот alias не публикуется в ingress-сети. Caddy использует `fitlog-backend`.
 `FITLOG_PROXY_NETWORK` выбирает внешнюю сеть; по умолчанию `edge-fitlog`.
 Проект не читает конфигурацию Pulse или IMAP и не управляет их сервисами.
+
+## Ежедневные общие резервные копии
+
+С 2026-10-18 production включён в общий backup Pulse + FitLog + IMAP + server-infra.
+Таймер `server-backup.timer` пользователя deploy выполняется каждый день в
+**04:00 Europe/Moscow** независимо от SSH-сеанса. Архивы age:
+`/home/deploy/server-backups/archives`, хранение 14 дней; автоматическая загрузка
+на Mac каждый час в `~/Backups/server-services/archives`, хранение 30 дней.
+Mac забирает накопившиеся копии после включения/пробуждения, пока они есть на VPS.
+Включены custom dump БД, `.env`, текущий release, ключи приложений и Caddy state.
+Ключ расшифровки остаётся на Mac: `~/.ssh/server_backups.agekey`, не на VPS/Git.
+
+Состояние: `systemctl --user list-timers server-backup.timer` и
+`~/server-backups/last-success.json` / `last-error.json` на VPS;
+`~/Backups/server-services/last-success.json` / `last-error.json` на Mac.
+Первое восстановление всех трёх БД в отдельный PostgreSQL проверено 2026-10-18.
+Исходники, тесты и полная инструкция восстановления — `server-infra/backups/README.md`.
+Общий backup работает отдельно от релизов приложения; предыдущие разовые копии
+сохраняются. Архив IMAP содержит данные сервиса, а не содержимое почтовых ящиков.
