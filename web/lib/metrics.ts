@@ -9,6 +9,7 @@ type MetricSummary = {
   maximum?: number | null;
   change?: number | null;
   samples?: number | null;
+  incomplete_samples?: number | null;
 };
 
 function isMetricSummary(value: unknown): value is MetricSummary {
@@ -39,6 +40,7 @@ const metricLabels: Record<string, string> = {
   protein: "Белок",
   fat: "Жиры",
   carbohydrates: "Углеводы",
+  fiber: "Клетчатка",
   days_logged: "Дней с питанием",
   days_in_target: "Дней в цели",
   sessions: "Тренировки",
@@ -67,7 +69,7 @@ function unitFor(key: string) {
   if (key.includes("inbody_score")) return undefined;
   if (key.endsWith("minutes")) return "мин";
   if (key.includes("body_water") || key.includes("cellular_water")) return "л";
-  if (["protein", "fat", "carbohydrates"].includes(key.split(".").at(-1) ?? ""))
+  if (["protein", "fat", "carbohydrates", "fiber"].includes(key.split(".").at(-1) ?? ""))
     return "г";
   if (key.endsWith("recovery") || key.endsWith("body_fat")) return "%";
   if (
@@ -99,7 +101,7 @@ function collect(
     const path = prefix ? `${prefix}.${key}` : key;
     if (isMetricSummary(value)) {
       result[path] = {
-        label: humanize(path),
+        label: humanize(path) + (value.incomplete_samples ? " · неполные данные" : ""),
         value: value.current ?? value.average ?? null,
         unit: unitFor(path),
         delta: value.change,

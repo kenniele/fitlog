@@ -90,9 +90,9 @@ func fatSecretBackfillCmd() *cobra.Command {
 				count = result.LoggedDays
 			}
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"FatSecret %s..%s: fetched %d months for %d completed days; %d logged days; latest %s; %s %d rows\n",
+				"FatSecret %s..%s: fetched %d months for %d completed days; %d logged days; latest %s; %s %d rows; fiber available for %d days\n",
 				result.From, result.To, result.RequestedMonths, result.RequestedDays,
-				result.LoggedDays, latest, verb, count,
+				result.LoggedDays, latest, verb, count, result.FiberDays,
 			)
 			return nil
 		},

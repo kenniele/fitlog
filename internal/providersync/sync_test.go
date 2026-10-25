@@ -62,6 +62,10 @@ type fakeFatSecretSource struct {
 	err   error
 }
 
+func (s *fakeFatSecretSource) FoodEntriesForDay(context.Context, time.Time) ([]domain.MealEntry, error) {
+	return nil, nil
+}
+
 func (s *fakeFatSecretSource) FoodEntriesMonth(context.Context, time.Time) ([]domain.DailyNutrition, error) {
 	s.calls++
 	return s.rows, s.err

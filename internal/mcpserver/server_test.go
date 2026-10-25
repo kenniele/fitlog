@@ -25,6 +25,7 @@ type testStore struct {
 	payload  json.RawMessage
 	failure  error
 	calls    int
+	items    []json.RawMessage
 }
 
 func (s *testStore) Settings(_ context.Context, owner int64, _ string) (controlcenter.Settings, error) {
@@ -38,6 +39,9 @@ func (s *testStore) Sources(_ context.Context, owner int64) ([]controlcenter.Sou
 func (s *testStore) List(_ context.Context, owner int64, resource string, p controlcenter.Pagination, loc *time.Location) (controlcenter.ListResult, error) {
 	s.owner, s.loc, s.options, s.resource = owner, loc, p, resource
 	s.calls++
+	if s.items != nil {
+		return controlcenter.ListResult{Items: s.items, Total: len(s.items), Page: p.Page, PageSize: p.PageSize}, s.failure
+	}
 	return controlcenter.ListResult{Items: []json.RawMessage{json.RawMessage(`{"id":7,"weight_kg":null,"rir":0}`)}, Total: 26, Page: p.Page, PageSize: p.PageSize}, s.failure
 }
 func (s *testStore) Get(_ context.Context, owner int64, resource string, id int64, loc *time.Location) (json.RawMessage, error) {
@@ -134,6 +138,24 @@ func TestReadToolsPreserveOwnerTimezoneAndNull(t *testing.T) {
 	}
 	if store.owner != 42 || store.loc.String() != "Europe/Moscow" || store.options.Page != 2 || store.options.Filters["exercise_id"] != "9" || store.options.From.Location() != store.loc {
 		t.Fatalf("wrong scope/options: %+v", store)
+	}
+}
+
+func TestNutritionToolPreservesFiberAndUnknownValues(t *testing.T) {
+	store := &testStore{items: []json.RawMessage{
+		json.RawMessage(`{"id":1,"fiber_g":24.5,"fiber_incomplete":true}`),
+		json.RawMessage(`{"id":2,"fiber_g":0}`),
+		json.RawMessage(`{"id":3,"fiber_g":null}`),
+	}}
+	cs := connect(t, newTestAdapter(store).server(false))
+	r := call(t, cs, "list_nutrition", map[string]any{"from": "2026-10-22", "to": "2026-10-24"})
+	if r.IsError || r.StructuredContent == nil || store.resource != "nutrition" {
+		t.Fatalf("nutrition result=%+v resource=%s", r, store.resource)
+	}
+	for _, field := range []string{`"fiber_g":24.5`, `"fiber_g":0`, `"fiber_g":null`, `"fiber_incomplete":true`} {
+		if !strings.Contains(resultText(r), field) {
+			t.Fatalf("missing %s in %s", field, resultText(r))
+		}
 	}
 }
 func TestInvalidInputsAndErrorRedaction(t *testing.T) {

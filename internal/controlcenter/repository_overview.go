@@ -224,6 +224,7 @@ func (r *PostgresRepository) loadDailyWindow(ctx context.Context, ownerID int64,
 			sleep.efficiency_percent, sleep.consistency_percent, sleep.sleep_debt_seconds, sleep.disturbances,
 			sleep.rem_seconds, sleep.deep_seconds, sleep.light_seconds, sleep.awake_seconds,
 			nutrition.calories_kcal, nutrition.protein_g, nutrition.fat_g, nutrition.carbohydrates_g, nutrition.fiber_g,
+			COALESCE(nutrition.fiber_incomplete,false),
 			nutrition.sugar_g, nutrition.saturated_fat_g, nutrition.sodium_mg, nutrition.potassium_mg, nutrition.water_ml,
 			body.weight_kg, body.body_fat_percent, body.fat_mass_kg, body.lean_mass_kg,
 			body.skeletal_muscle_mass_kg, body.waist_cm, body.chest_cm, body.biceps_cm, body.thigh_cm,
@@ -256,7 +257,7 @@ func (r *PostgresRepository) loadDailyWindow(ctx context.Context, ownerID int64,
 		) sleep ON true
 		LEFT JOIN LATERAL (
 			SELECT calories_kcal::double precision,protein_g::double precision,fat_g::double precision,
-				carbohydrates_g::double precision,fiber_g::double precision,sugar_g::double precision,
+				carbohydrates_g::double precision,fiber_g::double precision,fiber_incomplete,sugar_g::double precision,
 				saturated_fat_g::double precision,sodium_mg::double precision,potassium_mg::double precision,
 				water_ml::double precision
 			FROM nutrition_days WHERE owner_id=$1 AND entry_date=days.day
@@ -331,6 +332,7 @@ func (r *PostgresRepository) loadDailyWindow(ctx context.Context, ownerID int64,
 			&point.SleepEfficiencyPercent, &point.SleepConsistencyPercent, &point.SleepDebtSeconds, &point.Disturbances,
 			&point.REMSeconds, &point.DeepSeconds, &point.LightSeconds, &point.AwakeSeconds,
 			&point.CaloriesKcal, &point.ProteinG, &point.FatG, &point.CarbohydratesG, &point.FiberG,
+			&point.FiberIncomplete,
 			&point.SugarG, &point.SaturatedFatG, &point.SodiumMG, &point.PotassiumMG, &point.WaterML,
 			&point.WeightKG, &point.BodyFatPercent, &point.FatMassKG, &point.LeanMassKG,
 			&point.SkeletalMuscleMassKG, &point.WaistCM, &point.ChestCM, &point.BicepsCM, &point.ThighCM,
@@ -391,6 +393,9 @@ func (r *PostgresRepository) summarize(ctx context.Context, ownerID int64, dateR
 		if point.CaloriesKcal != nil || point.ProteinG != nil || point.FatG != nil || point.CarbohydratesG != nil {
 			summary.Nutrition.DaysLogged++
 		}
+		if point.FiberG != nil && point.FiberIncomplete {
+			summary.Nutrition.Fiber.IncompleteSamples++
+		}
 	}
 	summary.Training.AverageRIR = weightedAverageRIR(daily)
 	summary.Recovery.Recovery = metricSummary(daily, func(point DailyPoint) *float64 { return point.RecoveryScore })
@@ -402,6 +407,7 @@ func (r *PostgresRepository) summarize(ctx context.Context, ownerID int64, dateR
 	summary.Nutrition.Protein = metricSummary(daily, func(point DailyPoint) *float64 { return point.ProteinG })
 	summary.Nutrition.Fat = metricSummary(daily, func(point DailyPoint) *float64 { return point.FatG })
 	summary.Nutrition.Carbohydrates = metricSummary(daily, func(point DailyPoint) *float64 { return point.CarbohydratesG })
+	summary.Nutrition.Fiber.MetricSummary = metricSummary(daily, func(point DailyPoint) *float64 { return point.FiberG })
 	summary.Body.Weight = metricSummary(daily, func(point DailyPoint) *float64 { return point.WeightKG })
 	summary.Body.BodyFat = metricSummary(daily, func(point DailyPoint) *float64 { return point.BodyFatPercent })
 	summary.Body.FatMass = metricSummary(daily, func(point DailyPoint) *float64 { return point.FatMassKG })

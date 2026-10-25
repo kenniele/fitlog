@@ -242,7 +242,8 @@ func (w *Worker) syncAndLog(ctx context.Context) {
 	} else if !result.FatSecretSkipped {
 		w.logger.Info("automatic FatSecret sync completed",
 			"from", result.FatSecret.From, "to", result.FatSecret.To,
-			"nutrition_rows", result.FatSecret.UpsertedDays)
+			"nutrition_rows", result.FatSecret.UpsertedDays,
+			"fiber_days", result.FatSecret.FiberDays)
 	}
 	w.logger.Debug("automatic provider sync cycle finished", "duration", time.Since(started))
 }

@@ -126,6 +126,7 @@ type DailyPoint struct {
 	FatG                    *float64              `json:"fat_g"`
 	CarbohydratesG          *float64              `json:"carbohydrates_g"`
 	FiberG                  *float64              `json:"fiber_g"`
+	FiberIncomplete         bool                  `json:"fiber_incomplete"`
 	SugarG                  *float64              `json:"sugar_g"`
 	SaturatedFatG           *float64              `json:"saturated_fat_g"`
 	SodiumMG                *float64              `json:"sodium_mg"`
@@ -209,8 +210,14 @@ type NutritionSummary struct {
 	Protein       MetricSummary `json:"protein"`
 	Fat           MetricSummary `json:"fat"`
 	Carbohydrates MetricSummary `json:"carbohydrates"`
+	Fiber         FiberSummary  `json:"fiber"`
 	DaysLogged    int           `json:"days_logged"`
 	DaysInTarget  int           `json:"days_in_target"`
+}
+
+type FiberSummary struct {
+	MetricSummary
+	IncompleteSamples int `json:"incomplete_samples"`
 }
 
 type BodySummary struct {

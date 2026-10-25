@@ -14,10 +14,11 @@ const MaxBackfillDays = 366
 
 var ErrStoragePermissionRequired = errors.New("persistent FatSecret content storage requires explicit authorization")
 
-// NutritionBackfillSource is the smallest provider contract needed for a
-// historical rollup. The monthly endpoint keeps a 100-day run to 4-5 calls.
+// NutritionBackfillSource supplies monthly macros and daily entries for fiber,
+// which is not available from the monthly endpoint.
 type NutritionBackfillSource interface {
 	FoodEntriesMonth(context.Context, time.Time) ([]domain.DailyNutrition, error)
+	FoodEntriesForDay(context.Context, time.Time) ([]domain.MealEntry, error)
 }
 
 // NutritionBackfillSink atomically upserts a provider batch. Implementations
@@ -41,6 +42,7 @@ type BackfillResult struct {
 	RequestedMonths     int
 	LoggedDays          int
 	UpsertedDays        int
+	FiberDays           int
 	LatestAvailableDate string
 	DryRun              bool
 }
@@ -103,9 +105,26 @@ func BackfillNutritionDays(
 	snapshots := make([]domain.NutritionDaySnapshot, 0, len(dateInts))
 	for _, dateInt := range dateInts {
 		row := seen[dateInt]
+		date := FromDateInt(dateInt)
+		day := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, loc)
+		entries, err := source.FoodEntriesForDay(ctx, day)
+		if err != nil {
+			return BackfillResult{}, fmt.Errorf("fetch FatSecret day %s: %w", day.Format("2006-01-02"), err)
+		}
+		for _, entry := range entries {
+			if entry.DateInt != dateInt {
+				return BackfillResult{}, fmt.Errorf("FatSecret day %s returned entry for date_int %d",
+					day.Format("2006-01-02"), entry.DateInt)
+			}
+		}
+		fiber, incomplete := totalFiber(entries)
+		if fiber != nil {
+			result.FiberDays++
+		}
 		snapshots = append(snapshots, domain.NutritionDaySnapshot{
 			DateInt: dateInt, CaloriesKcal: floatPointer(row.Calories), ProteinG: floatPointer(row.Protein),
 			FatG: floatPointer(row.Fat), CarbohydratesG: floatPointer(row.Carbs),
+			FiberG: fiber, FiberIncomplete: incomplete,
 		})
 	}
 	result.LoggedDays = len(snapshots)

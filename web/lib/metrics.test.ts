@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { dailyPointMetrics } from "@/lib/metrics";
+import { dailyPointMetrics, summaryToMetrics, comparisonSummaryMetrics } from "@/lib/metrics";
+
+it("labels incomplete fiber totals in summaries and comparisons", () => {
+  const summary = { fiber: { current: 22.3, average: 30.8, samples: 3, incomplete_samples: 3 } };
+  expect(summaryToMetrics(summary).fiber).toMatchObject({
+    value: 22.3, unit: "г", label: "Клетчатка · неполные данные",
+  });
+  expect(comparisonSummaryMetrics(summary, { fiber: { current: 20, samples: 1 } }).fiber.label)
+    .toBe("Клетчатка · неполные данные");
+});
 
 describe("dailyPointMetrics", () => {
   it("keeps missing values empty and compares today with the previous day", () => {

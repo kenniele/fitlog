@@ -38,6 +38,69 @@ func TestUseCaseDailyPipeline(t *testing.T) {
 	require.Contains(t, output, "Омлет")
 }
 
+func TestUseCaseDailyFiber(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		fibers     []*float64
+		total      *float64
+		incomplete bool
+		dayText    string
+		mealTexts  []string
+	}{
+		{
+			name:   "sum within and across meals",
+			fibers: []*float64{floatPointer(3.25), floatPointer(1.25), floatPointer(5.5)},
+			total:  floatPointer(10), dayText: "10 г",
+			mealTexts: []string{"4\\.5 г", "5\\.5 г"},
+		},
+		{
+			name:   "explicit zero",
+			fibers: []*float64{floatPointer(0), floatPointer(0), floatPointer(0)},
+			total:  floatPointer(0), dayText: "0 г",
+			mealTexts: []string{"0 г", "0 г"},
+		},
+		{
+			name:   "all missing",
+			fibers: []*float64{nil, nil, nil}, incomplete: true, dayText: "нет данных",
+			mealTexts: []string{"нет данных", "нет данных"},
+		},
+		{
+			name:   "partially missing meal",
+			fibers: []*float64{floatPointer(3.5), nil, floatPointer(2)},
+			total:  floatPointer(5.5), incomplete: true, dayText: "5\\.5 г · неполные данные",
+			mealTexts: []string{"3\\.5 г · неполные данные", "2 г"},
+		},
+		{
+			name:   "missing entire meal",
+			fibers: []*float64{nil, nil, floatPointer(2)},
+			total:  floatPointer(2), incomplete: true, dayText: "2 г · неполные данные",
+			mealTexts: []string{"нет данных", "2 г"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			source := reportSource{entries: []domain.MealEntry{
+				{Meal: domain.MealBreakfast, FoodName: "Овсянка", Fiber: tt.fibers[0]},
+				{Meal: domain.MealBreakfast, FoodName: "Яблоко", Fiber: tt.fibers[1]},
+				{Meal: domain.MealDinner, FoodName: "Салат", Fiber: tt.fibers[2]},
+			}}
+			u := NewUseCase(source, time.UTC)
+			day := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+			fetched, err := u.Fetch(context.Background(), Day(day, time.UTC))
+			require.NoError(t, err)
+			report := u.Transform(fetched)
+			require.Equal(t, tt.total, report.Fiber)
+			require.Equal(t, tt.incomplete, report.FiberIncomplete)
+			require.Len(t, report.Groups, 2)
+			output := u.Format(report)
+			require.Contains(t, output, "\nКлетчатка: "+tt.dayText+"\n\n")
+			for i, text := range tt.mealTexts {
+				require.Equal(t, text, formatFiber(report.Groups[i].Fiber, report.Groups[i].FiberIncomplete))
+				require.Contains(t, output, "\n  Клетчатка: "+text+"\n")
+			}
+		})
+	}
+}
+
 func TestYesterdayRequestUsesPreviousCalendarDay(t *testing.T) {
 	loc := time.FixedZone("UTC+3", 3*60*60)
 	now := time.Date(2026, 7, 22, 0, 30, 0, 0, loc)
@@ -56,6 +119,7 @@ func TestUseCaseDailyFallsBackToMonthlyTotals(t *testing.T) {
 	output, err := u.Execute(context.Background(), Day(day, time.UTC))
 	require.NoError(t, err)
 	require.Contains(t, output, "*Итого:* 2345 kcal · Б 210 · Ж 68 · У 220")
+	require.Contains(t, output, "Клетчатка: нет данных")
 	require.Contains(t, output, "без детализации приёмов пищи")
 }
 

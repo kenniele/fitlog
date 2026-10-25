@@ -48,7 +48,7 @@ function NutritionContent() {
     { accessorKey: "protein_g", header: "Белки", cell: ({ getValue }) => formatNumber(getValue<number | null>(), {}, " г") },
     { accessorKey: "fat_g", header: "Жиры", cell: ({ getValue }) => formatNumber(getValue<number | null>(), {}, " г") },
     { accessorKey: "carbohydrates_g", header: "Углеводы", cell: ({ getValue }) => formatNumber(getValue<number | null>(), {}, " г") },
-    { accessorKey: "fiber_g", header: "Клетчатка", cell: ({ getValue }) => formatNumber(getValue<number | null>(), {}, " г") },
+    { accessorKey: "fiber_g", header: "Клетчатка", cell: ({ getValue, row }) => <>{formatNumber(getValue<number | null>(), {}, " г")}{row.original.fiber_incomplete && row.original.fiber_g != null ? <span className="block text-xs text-muted">Неполные данные</span> : null}</> },
     { accessorKey: "water_ml", header: "Вода", cell: ({ getValue }) => formatNumber(getValue<number | null>(), {}, " мл") },
     { accessorKey: "source", header: "Источник", cell: ({ getValue }) => <Badge>{String(getValue() ?? "Без данных")}</Badge> },
     { id: "actions", header: "", cell: ({ row }) => <div className="flex justify-end gap-1"><Button variant="ghost" size="icon" aria-label="Редактировать питание" onClick={() => { setEditing(row.original); setForm(true); }}><Pencil className="size-4" /></Button><Button variant="ghost" size="icon" aria-label="Удалить питание" onClick={() => setDeleting(row.original)}><Trash2 className="size-4" /></Button></div> },
@@ -95,7 +95,7 @@ function NutritionContent() {
         { key: "sodium_mg", label: "Натрий" },
         { key: "potassium_mg", label: "Калий" },
         { key: "water_ml", label: "Вода", variant: "area" },
-        { key: "fiber_g", label: "Клетчатка", variant: "bar" },
+        { key: "fiber_g", label: "Клетчатка", variant: "bar", description: "Сумма известных значений клетчатки. Дни с пропусками у отдельных продуктов отмечены в таблице как неполные." },
       ]} />
       <CalendarHeatmap title="Соблюдение калорийной цели" description={target ? "100% означает точное попадание; насыщенность снижается с отклонением от цели." : "Задайте калорийную цель в настройках, чтобы рассчитать соблюдение."} data={target ? daily : []} dataKey="target_adherence_percent" unit="%" />
     </div>

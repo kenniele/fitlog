@@ -101,8 +101,8 @@ make demo-seed
 ```
 
 An operator-only FatSecret history backfill is also available. It reads the
-already encrypted delegated OAuth token, fetches monthly daily totals, and
-defaults to the latest 100 completed local days:
+already encrypted delegated OAuth token, fetches monthly macro totals and daily
+entries for fiber, and defaults to the latest 100 completed local days:
 
 ```bash
 go run ./cmd/fitlog fatsecret-backfill --days 100 --dry-run

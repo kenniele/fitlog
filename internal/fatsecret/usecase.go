@@ -58,12 +58,14 @@ type FetchedReport struct {
 }
 
 type MealGroup struct {
-	Kind     domain.MealKind
-	Entries  []domain.MealEntry
-	Calories float64
-	Protein  float64
-	Fat      float64
-	Carbs    float64
+	Kind            domain.MealKind
+	Entries         []domain.MealEntry
+	Calories        float64
+	Protein         float64
+	Fat             float64
+	Carbs           float64
+	Fiber           *float64
+	FiberIncomplete bool
 }
 
 type Report struct {
@@ -79,6 +81,8 @@ type Report struct {
 	Protein                float64
 	Fat                    float64
 	Carbs                  float64
+	Fiber                  *float64
+	FiberIncomplete        bool
 	Analysis               *domain.NutritionAnalysis
 }
 
@@ -170,6 +174,7 @@ func (u *UseCase) Transform(in FetchedReport) Report {
 			}
 			return out
 		}
+		out.Fiber, out.FiberIncomplete = totalFiber(in.Entries)
 		groups := make(map[domain.MealKind]*MealGroup)
 		for _, entry := range in.Entries {
 			group := groups[entry.Meal]
@@ -185,6 +190,7 @@ func (u *UseCase) Transform(in FetchedReport) Report {
 		}
 		for _, kind := range []domain.MealKind{domain.MealBreakfast, domain.MealLunch, domain.MealDinner, domain.MealOther} {
 			if group := groups[kind]; group != nil {
+				group.Fiber, group.FiberIncomplete = totalFiber(group.Entries)
 				sort.SliceStable(group.Entries, func(i, j int) bool { return group.Entries[i].FoodName < group.Entries[j].FoodName })
 				out.Groups = append(out.Groups, *group)
 				out.Calories += group.Calories
@@ -282,9 +288,10 @@ func (u *UseCase) formatDaily(r Report) string {
 		b.WriteString("Записей за выбранный день нет\\.")
 		return b.String()
 	}
-	fmt.Fprintf(&b, "*Итого:* %s kcal · Б %s · Ж %s · У %s\n\n",
+	fmt.Fprintf(&b, "*Итого:* %s kcal · Б %s · Ж %s · У %s\n",
 		reportfmt.Number(r.Calories, 0), reportfmt.Number(r.Protein, 1),
 		reportfmt.Number(r.Fat, 1), reportfmt.Number(r.Carbs, 1))
+	fmt.Fprintf(&b, "Клетчатка: %s\n\n", formatFiber(r.Fiber, r.FiberIncomplete))
 	if len(r.Groups) == 0 {
 		b.WriteString("FatSecret вернул итог за день без детализации приёмов пищи\\.")
 		return b.String()
@@ -293,6 +300,7 @@ func (u *UseCase) formatDaily(r Report) string {
 		fmt.Fprintf(&b, "%s *%s* — %s kcal · Б %s · Ж %s · У %s\n",
 			mealIcon(group.Kind), reportfmt.Escape(mealName(group.Kind)), reportfmt.Number(group.Calories, 0),
 			reportfmt.Number(group.Protein, 1), reportfmt.Number(group.Fat, 1), reportfmt.Number(group.Carbs, 1))
+		fmt.Fprintf(&b, "  Клетчатка: %s\n", formatFiber(group.Fiber, group.FiberIncomplete))
 		for _, entry := range group.Entries {
 			fmt.Fprintf(&b, "  • %s", reportfmt.Escape(entry.FoodName))
 			if entry.Calories != nil {
@@ -320,6 +328,33 @@ func (u *UseCase) formatSummary(r Report) string {
 		reportfmt.Number(r.Fat, 1), reportfmt.Number(r.Carbs, 1))
 	fmt.Fprintf(&b, "  Учтено %d %s с записями", r.LoggedDays, reportfmt.PluralDays(r.LoggedDays))
 	return b.String()
+}
+
+func totalFiber(entries []domain.MealEntry) (*float64, bool) {
+	var total *float64
+	var incomplete bool
+	for _, entry := range entries {
+		if entry.Fiber == nil {
+			incomplete = true
+			continue
+		}
+		if total == nil {
+			total = new(float64)
+		}
+		*total += *entry.Fiber
+	}
+	return total, incomplete
+}
+
+func formatFiber(value *float64, incomplete bool) string {
+	if value == nil {
+		return "нет данных"
+	}
+	formatted := reportfmt.Number(*value, 1) + " г"
+	if incomplete {
+		formatted += " · неполные данные"
+	}
+	return formatted
 }
 
 func pointerValue(value *float64) float64 {

@@ -32,6 +32,7 @@ const nutritionJSON = `jsonb_build_object(
 	'id', id, 'date', entry_date, 'calories_kcal', calories_kcal::double precision,
 	'protein_g', protein_g::double precision, 'fat_g', fat_g::double precision,
 	'carbohydrates_g', carbohydrates_g::double precision, 'fiber_g', fiber_g::double precision,
+	'fiber_incomplete', fiber_incomplete,
 	'sugar_g', sugar_g::double precision, 'saturated_fat_g', saturated_fat_g::double precision,
 	'sodium_mg', sodium_mg::double precision, 'potassium_mg', potassium_mg::double precision,
 	'water_ml', water_ml::double precision, 'source', source, 'external_id', external_id,

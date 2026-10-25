@@ -14,17 +14,18 @@ type DailyNutrition struct {
 // persistence. Optional fields stay nil when the source does not expose them;
 // missing micronutrients must never be turned into zeroes by a sync.
 type NutritionDaySnapshot struct {
-	DateInt        int
-	CaloriesKcal   *float64
-	ProteinG       *float64
-	FatG           *float64
-	CarbohydratesG *float64
-	FiberG         *float64
-	SugarG         *float64
-	SaturatedFatG  *float64
-	SodiumMg       *float64
-	PotassiumMg    *float64
-	WaterML        *float64
+	DateInt         int
+	CaloriesKcal    *float64
+	ProteinG        *float64
+	FatG            *float64
+	CarbohydratesG  *float64
+	FiberG          *float64
+	FiberIncomplete bool
+	SugarG          *float64
+	SaturatedFatG   *float64
+	SodiumMg        *float64
+	PotassiumMg     *float64
+	WaterML         *float64
 }
 
 // NutritionAnalysis is an aggregate for a completed calendar period. Deficit

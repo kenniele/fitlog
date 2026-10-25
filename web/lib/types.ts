@@ -171,6 +171,7 @@ export type NutritionDay = {
   fat_g?: NullableNumber;
   carbohydrates_g?: NullableNumber;
   fiber_g?: NullableNumber;
+  fiber_incomplete?: boolean;
   sugar_g?: NullableNumber;
   saturated_fat_g?: NullableNumber;
   sodium_mg?: NullableNumber;

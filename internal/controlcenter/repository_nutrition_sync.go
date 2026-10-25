@@ -36,18 +36,19 @@ func (r *PostgresRepository) UpsertFatSecretNutritionDays(
 		if _, err := tx.Exec(ctx, `INSERT INTO nutrition_days (
 			owner_id,entry_date,calories_kcal,protein_g,fat_g,carbohydrates_g,
 			fiber_g,sugar_g,saturated_fat_g,sodium_mg,potassium_mg,water_ml,
-			source,external_id,notes)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'fatsecret',$13,'')
+			source,external_id,notes,fiber_incomplete)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'fatsecret',$13,'',$14)
 			ON CONFLICT (owner_id,source,external_id) WHERE external_id IS NOT NULL
 			DO UPDATE SET entry_date=EXCLUDED.entry_date,calories_kcal=EXCLUDED.calories_kcal,
 				protein_g=EXCLUDED.protein_g,fat_g=EXCLUDED.fat_g,
 				carbohydrates_g=EXCLUDED.carbohydrates_g,fiber_g=EXCLUDED.fiber_g,
+				fiber_incomplete=EXCLUDED.fiber_incomplete,
 				sugar_g=EXCLUDED.sugar_g,saturated_fat_g=EXCLUDED.saturated_fat_g,
 				sodium_mg=EXCLUDED.sodium_mg,potassium_mg=EXCLUDED.potassium_mg,
 				water_ml=EXCLUDED.water_ml,updated_at=now()`,
 			ownerID, entryDate, day.CaloriesKcal, day.ProteinG, day.FatG, day.CarbohydratesG,
 			day.FiberG, day.SugarG, day.SaturatedFatG, day.SodiumMg, day.PotassiumMg,
-			day.WaterML, externalID,
+			day.WaterML, externalID, day.FiberIncomplete,
 		); err != nil {
 			return fmt.Errorf("upsert FatSecret day %s: %w", entryDate, err)
 		}
