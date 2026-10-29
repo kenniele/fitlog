@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -86,7 +87,9 @@ func TestClient_FoodEntriesMonth(t *testing.T) {
 }
 
 func TestClient_ErrorEnvelope(t *testing.T) {
+	calls := 0
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
 		_, _ = w.Write([]byte(`{"error":{"code":5,"message":"Invalid signature"}}`))
 	})
 
@@ -94,10 +97,13 @@ func TestClient_ErrorEnvelope(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Invalid signature")
 	require.Contains(t, err.Error(), "5")
+	require.Equal(t, 1, calls)
 }
 
 func TestClient_HTTPError(t *testing.T) {
+	calls := 0
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("boom"))
 	})
@@ -105,6 +111,7 @@ func TestClient_HTTPError(t *testing.T) {
 	_, err := c.ProfileGet(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "500")
+	require.Equal(t, 1, calls)
 }
 
 func TestClient_ContextCancel(t *testing.T) {
@@ -117,6 +124,109 @@ func TestClient_ContextCancel(t *testing.T) {
 
 	_, err := c.ProfileGet(ctx)
 	require.Error(t, err)
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestClient_RetriesTimeoutWithFreshSignature(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		query bool
+	}{
+		{name: "monthly form"},
+		{name: "daily query", query: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var requests []url.Values
+				signer := NewSigner("ck", "cs", "at", "asec")
+				client := NewClient(signer, Options{HTTPClient: &http.Client{
+					Timeout: 10 * time.Second,
+					Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+						require.NoError(t, req.ParseForm())
+						params := req.PostForm
+						if tc.query {
+							require.Equal(t, http.MethodGet, req.Method)
+							params = req.URL.Query()
+						} else {
+							require.Equal(t, http.MethodPost, req.Method)
+							require.Equal(t, "food_entries.get_month", params.Get("method"))
+						}
+						require.NotEmpty(t, params.Get("date"))
+						requests = append(requests, params)
+						if len(requests) == 1 {
+							<-req.Context().Done()
+							return nil, req.Context().Err()
+						}
+						return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+					}),
+				}})
+				if tc.query {
+					_, err := client.FoodEntriesForDay(t.Context(), time.Now())
+					require.NoError(t, err)
+				} else {
+					_, err := client.FoodEntriesMonth(t.Context(), time.Now())
+					require.NoError(t, err)
+				}
+				require.Len(t, requests, 2)
+				require.NotEqual(t, requests[0].Get("oauth_nonce"), requests[1].Get("oauth_nonce"))
+				require.NotEqual(t, requests[0].Get("oauth_signature"), requests[1].Get("oauth_signature"))
+			})
+		})
+	}
+}
+
+func TestClient_TimeoutRetryIsBounded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		client := NewClient(NewSigner("ck", "cs", "at", "asec"), Options{HTTPClient: &http.Client{
+			Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return nil, context.DeadlineExceeded
+			}),
+		}})
+		_, err := client.FoodEntriesMonth(t.Context(), time.Now())
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Equal(t, 2, calls)
+	})
+}
+
+func TestClient_RetryRespectsContext(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		cancelInRequest bool
+	}{
+		{name: "canceled request", cancelInRequest: true},
+		{name: "canceled during backoff"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				if !tc.cancelInRequest {
+					time.AfterFunc(100*time.Millisecond, cancel)
+				}
+				calls := 0
+				client := NewClient(NewSigner("ck", "cs", "at", "asec"), Options{HTTPClient: &http.Client{
+					Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+						calls++
+						if tc.cancelInRequest {
+							cancel()
+							return nil, context.Canceled
+						}
+						return nil, context.DeadlineExceeded
+					}),
+				}})
+				_, err := client.FoodEntriesMonth(ctx, time.Now())
+				require.ErrorIs(t, err, context.Canceled)
+				require.Equal(t, 1, calls)
+			})
+		})
+	}
 }
 
 func TestTruncate(t *testing.T) {

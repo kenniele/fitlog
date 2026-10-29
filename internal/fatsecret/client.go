@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -75,6 +77,30 @@ func (c *Client) do(ctx context.Context, params map[string]string) ([]byte, erro
 }
 
 func (c *Client) doRequest(ctx context.Context, method, endpoint string, params map[string]string, query bool) ([]byte, error) {
+	body, err := c.doRequestOnce(ctx, method, endpoint, params, query)
+	var networkError net.Error
+	if err == nil || ctx.Err() != nil || !errors.As(err, &networkError) || !networkError.Timeout() {
+		return body, err
+	}
+
+	// These API calls only read data, including the legacy POST calls. Retry
+	// one timed-out request, signing it again so OAuth never reuses a nonce.
+	const retryDelay = 250 * time.Millisecond
+	if c.logger != nil {
+		c.logger.Warn("fatsecret api request timed out; retrying once",
+			"http_method", method, "endpoint", endpoint, "retry_delay", retryDelay)
+	}
+	timer := time.NewTimer(retryDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+		return c.doRequestOnce(ctx, method, endpoint, params, query)
+	}
+}
+
+func (c *Client) doRequestOnce(ctx context.Context, method, endpoint string, params map[string]string, query bool) ([]byte, error) {
 	started := time.Now()
 	operation := params["method"]
 	if operation == "" {
