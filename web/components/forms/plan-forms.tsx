@@ -126,12 +126,12 @@ const planExerciseDraftSchema = z.object({
 });
 
 const templatesDraftSchema = z.array(z.object({
-  name: z.string().trim().min(1, "введите название шаблона"),
+  name: z.string().trim().min(1, "введите название тренировки"),
   exercises: z.array(planExerciseDraftSchema).min(1, "добавьте хотя бы одно упражнение"),
-}).passthrough()).min(1, "добавьте хотя бы один шаблон");
+}).passthrough()).min(1, "добавьте хотя бы одну тренировку");
 
 function makeTemplates(plan?: WorkoutPlan | null): DraftTemplate[] {
-  const input = plan?.templates?.length ? plan.templates : [{ name: "Full Body A", position: 1, exercises: [] }];
+  const input = plan?.templates?.length ? plan.templates : [{ name: "Тренировка А", position: 1, exercises: [] }];
   return input.map((template, index) => ({
     ...template,
     position: index + 1,
@@ -246,7 +246,7 @@ export function PlanForm({ open, onOpenChange, plan }: { open: boolean; onOpenCh
       setTemplateErrors(parsed.error.issues.map((issue) => {
         const templateIndex = typeof issue.path[0] === "number" ? issue.path[0] + 1 : null;
         const exerciseIndex = issue.path[1] === "exercises" && typeof issue.path[2] === "number" ? issue.path[2] + 1 : null;
-        const location = [templateIndex && `шаблон ${templateIndex}`, exerciseIndex && `упражнение ${exerciseIndex}`].filter(Boolean).join(", ");
+        const location = [templateIndex && `тренировка ${templateIndex}`, exerciseIndex && `упражнение ${exerciseIndex}`].filter(Boolean).join(", ");
         return `${location ? `${location}: ` : ""}${issue.message}`;
       }));
       return;
@@ -256,7 +256,7 @@ export function PlanForm({ open, onOpenChange, plan }: { open: boolean; onOpenCh
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title={plan ? "Редактировать план" : "Новый тренировочный план"} description="Prescription, разминка и порядок сохраняются в общей модели Telegram и Control Center." className="sm:max-w-6xl">
+    <Dialog open={open} onOpenChange={onOpenChange} title={plan ? "Редактировать программу" : "Новая программа тренировок"} description="Дайте программе название, добавьте тренировки и задайте упражнения для каждой." className="sm:max-w-6xl">
       <form onSubmit={form.handleSubmit(submitPlan)} className="space-y-5">
         <div className="grid gap-4 sm:grid-cols-[1fr_160px]">
           <Field label="Название" error={form.formState.errors.name?.message}><Input {...form.register("name")} /></Field>
@@ -264,14 +264,14 @@ export function PlanForm({ open, onOpenChange, plan }: { open: boolean; onOpenCh
         </div>
         <Field label="Описание"><Textarea {...form.register("description")} /></Field>
         <div className="space-y-4">
-          <div className="flex items-center justify-between"><h3 className="text-sm font-semibold">Шаблоны</h3><Button type="button" size="sm" onClick={() => setTemplates((current) => [...current, { key: String(Date.now()), name: `Шаблон ${current.length + 1}`, position: current.length + 1, exercises: [] }])}><Plus className="size-4" />Шаблон</Button></div>
+          <div className="flex items-center justify-between"><h3 className="text-sm font-semibold">Тренировки программы</h3><Button type="button" size="sm" onClick={() => setTemplates((current) => [...current, { key: String(Date.now()), name: `Тренировка ${current.length + 1}`, position: current.length + 1, exercises: [] }])}><Plus className="size-4" />Тренировка</Button></div>
           {templates.map((template, templateIndex) => (
             <section key={template.key} className="rounded-card border border-line bg-canvas/35 p-4">
               <div className="flex items-end gap-2">
-                <Field label={`Шаблон ${templateIndex + 1}`} className="flex-1"><Input value={template.name} onChange={(event) => patchTemplate(templateIndex, { name: event.target.value })} required /></Field>
-                <Button type="button" variant="ghost" size="icon" aria-label="Шаблон выше" disabled={templateIndex === 0} onClick={() => move(templateIndex, -1)}><ArrowUp className="size-4" /></Button>
-                <Button type="button" variant="ghost" size="icon" aria-label="Шаблон ниже" disabled={templateIndex === templates.length - 1} onClick={() => move(templateIndex, 1)}><ArrowDown className="size-4" /></Button>
-                <Button type="button" variant="ghost" size="icon" aria-label="Удалить шаблон" disabled={templates.length === 1} onClick={() => setTemplates((current) => current.filter((_, index) => index !== templateIndex))}><Trash2 className="size-4" /></Button>
+                <Field label={`Тренировка ${templateIndex + 1}`} className="flex-1"><Input value={template.name} onChange={(event) => patchTemplate(templateIndex, { name: event.target.value })} required /></Field>
+                <Button type="button" variant="ghost" size="icon" aria-label="Тренировка выше" disabled={templateIndex === 0} onClick={() => move(templateIndex, -1)}><ArrowUp className="size-4" /></Button>
+                <Button type="button" variant="ghost" size="icon" aria-label="Тренировка ниже" disabled={templateIndex === templates.length - 1} onClick={() => move(templateIndex, 1)}><ArrowDown className="size-4" /></Button>
+                <Button type="button" variant="ghost" size="icon" aria-label="Удалить тренировку" disabled={templates.length === 1} onClick={() => setTemplates((current) => current.filter((_, index) => index !== templateIndex))}><Trash2 className="size-4" /></Button>
               </div>
               <div className="mt-4 space-y-3">
                 {(template.exercises ?? []).map((exercise, exerciseIndex) => (

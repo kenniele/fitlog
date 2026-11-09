@@ -363,6 +363,7 @@ export function WorkoutForm({ open, onOpenChange, session, initialPlan }: { open
   const handlePlanChange = (planID: string) => {
     form.setValue("plan_id", planID, { shouldDirty: true });
     form.setValue("template_id", "", { shouldDirty: true });
+    form.clearErrors("template_id");
     if (session || !["scheduled", "cancelled", "excused"].includes(form.getValues("status"))) return;
     if (planID) {
       clearExercisesForMaterialization();
@@ -373,6 +374,7 @@ export function WorkoutForm({ open, onOpenChange, session, initialPlan }: { open
 
   const handleTemplateChange = (templateID: string) => {
     form.setValue("template_id", templateID, { shouldDirty: true });
+    form.clearErrors("template_id");
     if (!session && templateID && ["scheduled", "cancelled", "excused"].includes(form.getValues("status"))) {
       clearExercisesForMaterialization();
     }
@@ -390,7 +392,13 @@ export function WorkoutForm({ open, onOpenChange, session, initialPlan }: { open
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange} title={session ? "Редактировать тренировку" : initialPlan ? `Запланировать: ${initialPlan.name}` : "Новая тренировка"} description="Завершённая тренировка сразу участвует в аналитике; планы и пропуски сохраняют scheduled_at." className="sm:max-w-4xl">
-      <form onSubmit={form.handleSubmit((values) => save.mutate(values))} className="space-y-5">
+      <form onSubmit={form.handleSubmit((values) => {
+          if (!snapshotProtected && values.plan_id && !values.template_id) {
+            form.setError("template_id", { message: "Выберите тренировку программы" });
+            return;
+          }
+          save.mutate(values);
+        })} className="space-y-5">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="Дата" error={form.formState.errors.date?.message}><Input type="date" {...form.register("date")} onChange={(event) => handleDateChange(event.target.value)} /></Field>
           <Field label="Статус"><Select {...form.register("status")} onChange={(event) => handleStatusChange(event.target.value as WorkoutStatus)}><option value="finished">Завершена</option><option value="active">Активна</option><option value="scheduled">Запланирована</option><option value="cancelled">Отменена</option><option value="excused">Пропущена по причине</option></Select></Field>
@@ -399,11 +407,11 @@ export function WorkoutForm({ open, onOpenChange, session, initialPlan }: { open
             : <Field label="Начало" error={form.formState.errors.started_at?.message}><Input type="datetime-local" {...form.register("started_at")} /></Field>}
           {status === "finished"
             ? <Field label="Завершение" error={form.formState.errors.finished_at?.message}><Input type="datetime-local" {...form.register("finished_at")} /></Field>
-            : <Field label="План"><Select disabled={snapshotProtected} {...form.register("plan_id")} onChange={(event) => handlePlanChange(event.target.value)}><option value="">Без плана</option>{planOptions.map((plan) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}</Select></Field>}
+            : <Field label="Программа тренировок"><Select disabled={snapshotProtected} {...form.register("plan_id")} onChange={(event) => handlePlanChange(event.target.value)}><option value="">Без программы</option>{planOptions.map((plan) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}</Select></Field>}
         </div>
-        {status === "finished" && <Field label="План"><Select disabled={snapshotProtected} {...form.register("plan_id")} onChange={(event) => handlePlanChange(event.target.value)}><option value="">Без плана</option>{planOptions.map((plan) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}</Select></Field>}
+        {status === "finished" && <Field label="Программа тренировок"><Select disabled={snapshotProtected} {...form.register("plan_id")} onChange={(event) => handlePlanChange(event.target.value)}><option value="">Без программы</option>{planOptions.map((plan) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}</Select></Field>}
         <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Шаблон"><Select disabled={snapshotProtected} {...form.register("template_id")} onChange={(event) => handleTemplateChange(event.target.value)}><option value="">Первый шаблон плана / без шаблона</option>{templateOptions.filter((template) => !selectedPlanID || template.planID === selectedPlanID).map((template) => <option key={`${template.planID}-${template.id}`} value={template.id}>{template.planName} · {template.name}</option>)}</Select></Field>
+          <Field label="Тренировка программы" error={form.formState.errors.template_id?.message}><Select disabled={snapshotProtected || !selectedPlanID} {...form.register("template_id")} onChange={(event) => handleTemplateChange(event.target.value)}><option value="">Выберите тренировку</option>{templateOptions.filter((template) => template.planID === selectedPlanID).map((template) => <option key={`${template.planID}-${template.id}`} value={template.id}>{template.name}</option>)}</Select></Field>
           <Field label="Название программы"><Input {...form.register("program_name")} placeholder="Свободная тренировка" /></Field>
           <Field label="Strain"><Input type="number" min="0" max="21" step="0.1" {...form.register("strain", number)} /></Field>
         </div>

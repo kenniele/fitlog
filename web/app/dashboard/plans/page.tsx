@@ -46,16 +46,17 @@ function PlansContent() {
 
   return (
     <>
-      <PageHeader eyebrow="Программы" title="Планы, шаблоны и упражнения" description="Ваши тренировочные программы, упражнения и недельное расписание." actions={<><Button onClick={() => { setEditingExercise(null); setExerciseForm(true); }}><Plus className="size-4" />Упражнение</Button><Button variant="primary" onClick={open}><Plus className="size-4" />План</Button></>} />
+      <PageHeader eyebrow="Программы" title="Программы тренировок" description="Ваши тренировочные программы, упражнения и недельное расписание." actions={<><Button onClick={() => { setEditingExercise(null); setExerciseForm(true); }}><Plus className="size-4" />Упражнение</Button><Button variant="primary" onClick={open}><Plus className="size-4" />Программа</Button></>} />
       <section>
-        <SectionHeader title="Тренировочные планы" description="Задайте порядок упражнений, разминку, рабочие веса и отдых." className="mb-3" />
-        {!listItems(plans.data).length && <EmptyState title="Соберите свою программу" description="Добавьте план с упражнениями, чтобы перенести тренировки в расписание." action={<Button onClick={open}>Создать план</Button>} />}
+        <SectionHeader title="Ваши программы" description="Задайте порядок упражнений, разминку, рабочие веса и отдых." className="mb-3" />
+        {!listItems(plans.data).length && <EmptyState title="Соберите свою программу" description="Добавьте программу с тренировками и упражнениями, чтобы перенести тренировки в расписание." action={<Button onClick={open}>Создать программу</Button>} />}
         <div className="grid gap-3 lg:grid-cols-2">
           {listItems(plans.data).map((plan) => (
             <Card key={plan.id} className="p-5">
-              <div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{plan.name}</h3><p className="mt-1 text-sm text-muted">{plan.description || "Без описания"}</p></div><Badge tone={plan.active ? "good" : "neutral"}>{plan.active ? "активен" : "не активен"}</Badge></div>
+              <div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{plan.name}</h3><p className="mt-1 text-sm text-muted">{plan.description || "Без описания"}</p></div><Badge tone={plan.active ? "good" : "neutral"}>{plan.active ? "активна" : "не активна"}</Badge></div>
+              <ul className="mt-3 space-y-1 text-sm">{(plan.templates ?? []).map((template) => <li key={template.id ?? template.position}>{template.name}</li>)}</ul>
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
-                <span className="text-xs text-muted">{formatNumber(plan.days_per_week)} дн./нед. · {formatNumber(plan.templates?.length)} шаблона</span>
+                <span className="text-xs text-muted">{formatNumber(plan.days_per_week)} дн./нед. · {formatNumber(plan.templates?.length)} тренировок</span>
                 <div className="flex flex-wrap gap-1"><Button size="sm" disabled={!plan.active || !(plan.templates ?? []).some((template) => template.id != null)} title={!plan.active ? "У плана нет активной ревизии" : undefined} onClick={() => setSchedulePlan(plan)}><CalendarPlus className="size-4" />Неделя в расписание</Button><Button variant="ghost" size="icon" aria-label="Редактировать" onClick={() => { setEditingPlan(plan); setPlanForm(true); }}><Pencil className="size-4" /></Button><Button variant="ghost" size="icon" aria-label="Удалить" onClick={() => setDeleting({ kind: "workout-plans", id: plan.id, name: plan.name })}><Trash2 className="size-4" /></Button></div>
               </div>
             </Card>

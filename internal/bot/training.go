@@ -20,6 +20,8 @@ import (
 const (
 	trainingCallbackHome                    = "training_home"
 	trainingCallbackStart                   = "training_start"
+	trainingCallbackStartPlan               = "training_start_plan"
+	trainingCallbackEditPlan                = "training_edit_plan"
 	trainingCallbackContinue                = "training_continue"
 	trainingCallbackProgram                 = "training_program"
 	trainingCallbackAddSet                  = "training_add_set"
@@ -68,6 +70,8 @@ func (b *Bot) registerTrainingHandlers() {
 	currentCard := b.trainingCardMiddleware()
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackHome}, b.handleTrainingHome, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackStart}, b.handleTrainingStart, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackStartPlan}, b.handleTrainingPlanWorkouts, currentCard)
+	b.b.Handle(&tele.Btn{Unique: trainingCallbackEditPlan}, b.handleTrainingPlanWorkouts, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackContinue}, b.handleTrainingContinue, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackProgram}, b.handleTrainingProgram, currentCard)
 	b.b.Handle(&tele.Btn{Unique: trainingCallbackAddSet}, b.handleTrainingAddSet, currentCard)
@@ -174,14 +178,8 @@ func (b *Bot) handleTrainingStart(c tele.Context) error {
 	if len(programs) == 0 {
 		return b.showImportPrompt(ctx, c, ownerID, "Сначала импортируй хотя бы одну программу.")
 	}
-	markup := &tele.ReplyMarkup{}
-	rows := make([]tele.Row, 0, len(programs)+1)
-	for _, program := range programs {
-		rows = append(rows, markup.Row(markup.Data(program.Name, trainingCallbackProgram, strconv.FormatInt(program.ID, 10))))
-	}
-	rows = append(rows, markup.Row(markup.Data("‹ Назад", trainingCallbackHome)))
-	markup.Inline(rows...)
-	return b.editTrainingCard(ctx, c, ownerID, "<b>🏋️ Начать тренировку</b>\n\nВыбери программу:", markup)
+	text, markup := trainingPlansCard(programs, false)
+	return b.editTrainingCard(ctx, c, ownerID, text, markup)
 }
 
 func (b *Bot) handleTrainingProgram(c tele.Context) error {
@@ -632,7 +630,7 @@ func (b *Bot) finishTrainingImport(ctx context.Context, c tele.Context, ownerID 
 		exercises += len(program.Exercises)
 	}
 	return b.showTrainingHome(ctx, c, ownerID,
-		fmt.Sprintf("Сохранено программ: %d, упражнений: %d.", len(preview.Programs), exercises),
+		fmt.Sprintf("Сохранено тренировок: %d, упражнений: %d.", len(preview.Programs), exercises),
 	)
 }
 
@@ -648,28 +646,8 @@ func (b *Bot) handleTrainingPrograms(c tele.Context) error {
 	if err != nil {
 		return b.showTrainingFailure(ctx, c, ownerID, err)
 	}
-	var text strings.Builder
-	fmt.Fprintf(&text, "<b>📚 %s</b>\n", html.EscapeString(trainingProgramsTitle(programs)))
-	if len(programs) == 0 {
-		text.WriteString("\nПока ничего не сохранено.")
-	} else {
-		text.WriteString("\nВыбери тренировку для редактирования.")
-	}
-	markup := &tele.ReplyMarkup{}
-	rows := make([]tele.Row, 0, len(programs)+2)
-	for _, program := range programs {
-		rows = append(rows, markup.Row(markup.Data(
-			truncateTrainingButton("✏️ "+program.Name),
-			trainingCallbackProgramView,
-			strconv.FormatInt(program.ID, 10),
-		)))
-	}
-	rows = append(rows,
-		markup.Row(markup.Data("📎 Импорт", trainingCallbackImport)),
-		markup.Row(markup.Data("‹ Назад", trainingCallbackHome)),
-	)
-	markup.Inline(rows...)
-	return b.editTrainingCard(ctx, c, ownerID, text.String(), markup)
+	text, markup := trainingPlansCard(programs, true)
+	return b.editTrainingCard(ctx, c, ownerID, text, markup)
 }
 
 func trainingProgramsTitle(programs []training.Program) string {
@@ -1185,7 +1163,7 @@ func (b *Bot) showTrainingHome(ctx context.Context, c tele.Context, ownerID int6
 	} else {
 		text.WriteString("\nАктивной тренировки нет.")
 	}
-	fmt.Fprintf(&text, "\nПрограмм сохранено: %d", len(programs))
+	fmt.Fprintf(&text, "\nПрограмм: %d · тренировок: %d", len(groupTrainingPlans(programs)), len(programs))
 
 	markup := &tele.ReplyMarkup{}
 	rows := make([]tele.Row, 0, 4)
@@ -1531,7 +1509,7 @@ func (b *Bot) showTrainingProgram(
 			strconv.FormatInt(exercise.ID, 10),
 		)))
 	}
-	rows = append(rows, markup.Row(markup.Data("‹ К программам", trainingCallbackPrograms)))
+	rows = append(rows, markup.Row(markup.Data("‹ К тренировкам программы", trainingCallbackEditPlan, strconv.FormatInt(program.PlanID, 10))))
 	markup.Inline(rows...)
 	return b.editTrainingCard(ctx, c, program.OwnerID, text.String(), markup)
 }
@@ -1673,7 +1651,7 @@ func (b *Bot) showImportPrompt(ctx context.Context, c tele.Context, ownerID int6
 		return b.showTrainingFailure(ctx, c, ownerID, err)
 	}
 	text := "<b>📥 Импорт программы</b>\n\nОтправь YAML файлом, обычным сообщением или код-блоком. Также поддерживаются старые .txt и .csv до 1 МБ.\n\n" +
-		"YAML version 1 может содержать несколько тренировочных дней и настройки плана. Во время тренировки разминочные и обычные подходы добавляются вручную."
+		"В YAML program.name задаёт название программы, а workouts — её тренировки. Например: программа «Фуллбади» с тренировками А, Б и В. Для обновления существующей программы используй то же название. Во время тренировки разминочные и обычные подходы добавляются вручную."
 	if notice != "" {
 		text += "\n\n<b>" + html.EscapeString(notice) + "</b>"
 	}
@@ -1698,7 +1676,7 @@ func (b *Bot) showImportPreview(ctx context.Context, c tele.Context, ownerID int
 		fmt.Fprintf(&text, "\n\n<b>%s</b>", html.EscapeString(preview.Programs[0].PlanName))
 	}
 	fmt.Fprintf(&text, "\nТренировок: %d\nУпражнений: %d", len(preview.Programs), exercises)
-	text.WriteString("\n\nПосле подтверждения будет создана новая revision. Старые тренировки не изменятся.")
+	text.WriteString("\n\nПосле подтверждения программа будет сохранена. Новые занятия используют обновлённую программу; история тренировок сохранится.")
 	markup := &tele.ReplyMarkup{}
 	markup.Inline(
 		markup.Row(markup.Data("✅ Проверить и импортировать", trainingCallbackConfirmImport)),

@@ -192,6 +192,14 @@ The provider modules expose the same application pipeline: `Fetch → Transform 
 
 ## Strength workouts
 
+Workout programs contain ordered workout days. In Telegram, **Начать тренировку**
+first selects a program, then one of its workouts; **Программы** uses the same
+hierarchy for editing. Creating or updating a program through YAML uses
+`program.name` for the program and `workouts` for its days. In the Control Center,
+create a program and add its workouts on the Programs page; when creating a
+session, select its program before selecting a workout. Switching programs clears
+the previous workout selection. Existing sessions retain their snapshots.
+
 Training history can be downloaded as CSV or JSON. In the Control Center,
 open **Тренировки → Экспорт** and choose the current date range or all time;
 the current training filters apply across every page. In Telegram, open
