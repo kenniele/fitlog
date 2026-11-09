@@ -9,6 +9,7 @@ import { apiFetch, fetchAllList, listItems, type ListResponse } from "@/lib/api"
 import type { AnalyticsResponse, Exercise, Settings, WorkoutPlan, WorkoutSession } from "@/lib/types";
 import { parseFirstDayOfWeek } from "@/lib/week";
 import { useQuickAction, useRangeSearch } from "@/lib/hooks";
+import { JournalSections, QuerySection } from "@/components/ui/journal-sections";
 import { PageHeader } from "@/components/ui/page";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -130,50 +131,51 @@ function TrainingContent() {
   const columns = useMemo<ColumnDef<WorkoutSession>[]>(() => [
     { accessorKey: "date", header: "Дата", cell: ({ row }) => <span>{formatDate(row.original.date ?? row.original.started_at)}</span> },
     { accessorKey: "template_name", header: "Шаблон", cell: ({ row }) => <span className="font-medium">{row.original.template_name ?? row.original.plan_name ?? "Без плана"}</span> },
-    { accessorKey: "status", header: "Статус", cell: ({ getValue }) => <Badge tone={getValue() === "finished" ? "good" : "neutral"}>{String(getValue() ?? "Без данных")}</Badge> },
+    { accessorKey: "status", header: "Статус", cell: ({ getValue }) => <Badge tone={getValue() === "finished" ? "good" : "neutral"}>{({ finished: "Завершена", active: "Активна", scheduled: "Запланирована", cancelled: "Отменена", excused: "Пропущена по причине" } as Record<string, string>)[String(getValue())] ?? "Без данных"}</Badge> },
     { accessorKey: "working_sets", header: "Раб. подходы", cell: ({ getValue }) => formatNumber(getValue<number | null>()) },
     { accessorKey: "volume_kg", header: "Объём", cell: ({ getValue }) => formatNumber(getValue<number | null>(), {}, " кг") },
     { accessorKey: "duration_seconds", header: "Длительность", cell: ({ getValue }) => formatDuration(getValue<number | null>()) },
     { id: "actions", header: "", enableSorting: false, cell: ({ row }) => <div className="flex justify-end gap-1"><Button variant="ghost" size="icon" aria-label="Открыть" onClick={() => location.assign(`/dashboard/training/sessions/${row.original.id}`)}><Eye className="size-4" /></Button><Button variant="ghost" size="icon" aria-label="Редактировать" onClick={() => { setEditing(row.original); setFormOpen(true); }}><Pencil className="size-4" /></Button><Button variant="ghost" size="icon" aria-label="Удалить" onClick={() => setDeleting(row.original)}><Trash2 className="size-4" /></Button></div> },
   ], []);
 
-  if (sessions.isError || analytics.isError || exercises.isError || plans.isError || settings.isError) return <ErrorState error={sessions.error ?? analytics.error ?? exercises.error ?? plans.error ?? settings.error} retry={() => { void Promise.all([sessions.refetch(), analytics.refetch(), exercises.refetch(), plans.refetch(), settings.refetch()]); }} />;
-  if (sessions.isPending || analytics.isPending || exercises.isPending || plans.isPending || settings.isPending) return <PageSkeleton />;
-  const firstDayOfWeek = parseFirstDayOfWeek(settings.data.first_day_of_week);
-  if (firstDayOfWeek === null) return <ErrorState error={new Error("В настройках указан некорректный первый день недели")} retry={() => { void settings.refetch(); }} />;
+  const firstDayOfWeek = parseFirstDayOfWeek(settings.data?.first_day_of_week);
 
   return (
     <>
       <PageHeader eyebrow="Тренировки" title="Тренировки и прогрессия" description="Сессии, рабочий объём и сила внутри конкретных упражнений." actions={<><TrainingExport filters={exportFilters} /><Button variant="primary" onClick={openNew}><Plus className="size-4" />Тренировка</Button></>} />
-      <MetricGrid metrics={analytics.data?.comparison ? comparisonSummaryMetrics(analytics.data.summary, analytics.data.comparison) : summaryToMetrics(analytics.data?.summary)} />
-      <ExerciseProgress exercises={listItems(exercises.data)} />
-      <TrainingStreakCards streak={analytics.data?.streak} />
-      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-        <TrendChart title="Недельный объём" description="Завершённые working/drop-подходы, сгруппированные по сохранённому началу недели." data={analytics.data?.weekly} series={[{ key: "volume_kg", label: "Объём, кг" }]} variant="bar" />
-        <TrendChart title="Длительность по дням" description="Суммарное фактическое время завершённых сессий, сгруппированное по локальной дате старта." data={analytics.data?.daily_duration} series={[{ key: "duration_minutes", label: "Минуты" }]} variant="area" />
-        <TrendChart title="Рабочие подходы" data={analytics.data?.daily} series={[{ key: "working_sets", label: "Рабочие подходы" }]} />
-        <TrendChart title="План и выполнение" description="План привязан к scheduled_at; перенос фактического старта на другую дату не меняет день плана." data={analytics.data?.adherence} series={[{ key: "planned", label: "Запланировано" }, { key: "completed", label: "Выполнено", color: "var(--accent-blue)" }]} variant="bar" />
-      </div>
-      <ActivityHeatmap data={analytics.data?.heatmap} />
-      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-        <DistributionBars title="Рабочие подходы по мышечным группам" description="Каждый завершённый working/drop-подход учитывается по основной мышечной группе упражнения." data={analytics.data?.muscle_groups?.map((point) => ({ label: point.muscle_group || "Без группы", value: point.working_sets, detail: `${formatNumber(point.volume_kg, {}, " кг")}` }))} />
-        <DistributionBars title="Распределение RIR" description="Только завершённые working/drop-подходы с указанным фактическим RIR; дробные значения округлены до ближайшего бакета." data={analytics.data?.rir_distribution?.map((point) => ({ label: `RIR ${point.rir}`, value: point.sets }))} accent="blue" />
-      </div>
+      <JournalSections journal={<>      {exercises.isError && <ErrorState title="Недоступен фильтр упражнений" error={exercises.error} retry={() => { void exercises.refetch(); }} />}
+      {plans.isError && <ErrorState title="Недоступен фильтр программ" error={plans.error} retry={() => { void plans.refetch(); }} />}
       <Card>
         <div className="flex flex-col gap-3 border-b border-line p-4 lg:flex-row lg:items-center">
           <Input value={searchDraft} onChange={(event) => setSearch(event.target.value)} placeholder="Поиск по тренировкам" aria-label="Поиск по тренировкам" className="lg:max-w-xs" />
-          <Select aria-label="Фильтр по плану" value={plan} onChange={(event) => updateParams({ plan_id: event.target.value })} className="lg:max-w-[240px]"><option value="">Все планы</option>{listItems(plans.data).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select>
-          <Select aria-label="Фильтр по упражнению" value={exercise} onChange={(event) => updateParams({ exercise_id: event.target.value })} className="lg:max-w-[240px]"><option value="">Все упражнения</option>{listItems(exercises.data).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select>
+          <Select disabled={!plans.data} aria-label="Фильтр по плану" value={plan} onChange={(event) => updateParams({ plan_id: event.target.value })} className="lg:max-w-[240px]"><option value="">Все планы</option>{listItems(plans.data).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select>
+          <Select disabled={!exercises.data} aria-label="Фильтр по упражнению" value={exercise} onChange={(event) => updateParams({ exercise_id: event.target.value })} className="lg:max-w-[240px]"><option value="">Все упражнения</option>{listItems(exercises.data).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select>
           <Select aria-label="Фильтр по статусу" value={status} onChange={(event) => updateParams({ status: event.target.value })} className="lg:max-w-[210px]"><option value="">Все статусы</option><option value="scheduled">Запланировано</option><option value="active">Активно</option><option value="finished">Завершено</option><option value="cancelled">Отменено</option><option value="excused">Пропущено по причине</option></Select>
+          {(search || status || exercise || plan) && <Button variant="ghost" onClick={() => { if (searchTimer.current !== undefined) window.clearTimeout(searchTimer.current); setSearchDraft(""); updateParams({ search: null, status: null, exercise_id: null, plan_id: null }); }}>Сбросить фильтры</Button>}
           <div className="flex rounded-control border border-line bg-canvas/45 p-1 lg:ml-auto" aria-label="Представление тренировок" role="group"><Button type="button" size="sm" variant={view === "list" ? "secondary" : "ghost"} aria-pressed={view === "list"} onClick={() => updateParams({ view: null })}><List aria-hidden className="size-4" />Список</Button><Button type="button" size="sm" variant={view === "calendar" ? "secondary" : "ghost"} aria-pressed={view === "calendar"} onClick={() => updateParams({ view: "calendar" })}><CalendarDays aria-hidden className="size-4" />Календарь</Button></div>
         </div>
-        {view === "list" ? <><DataTable data={listItems(sessions.data)} columns={columns} emptyTitle="Тренировок не найдено" rowKey={(row) => String(row.id)} /><Pagination data={sessions.data} page={page} onPageChange={(nextPage) => updateParams({ page: nextPage === 1 ? null : String(nextPage) }, false)} disabled={sessions.isFetching} /></> : <div className="px-4 py-3 text-xs text-muted">Календарь использует отдельную серверную выборку по плановой дате и загружает все сессии выбранного периода.</div>}
+        {view === "list" ? <QuerySection query={sessions} title="Не удалось загрузить тренировки"><DataTable data={listItems(sessions.data)} columns={columns} emptyTitle="Тренировок не найдено" rowKey={(row) => String(row.id)} /><Pagination data={sessions.data} page={page} onPageChange={(nextPage) => updateParams({ page: nextPage === 1 ? null : String(nextPage) }, false)} disabled={sessions.isFetching} /></QuerySection> : <div className="px-4 py-3 text-xs text-muted">Все тренировки выбранного периода. Запланированные показаны на назначенную дату.</div>}
       </Card>
       {view === "calendar" && (calendarSessions.isError
         ? <ErrorState error={calendarSessions.error} retry={() => { void calendarSessions.refetch(); }} title="Не удалось загрузить календарь" />
         : calendarSessions.isPending
           ? <Card aria-busy="true" aria-label="Загрузка календаря" className="p-4"><Skeleton className="h-96" /></Card>
-          : <SessionCalendar from={selectedRange.from} to={selectedRange.to} sessions={calendarSessions.data} firstDayOfWeek={firstDayOfWeek} />)}
+          : firstDayOfWeek === null ? <ErrorState error={new Error("Выберите первый день недели в настройках")} /> : <SessionCalendar from={selectedRange.from} to={selectedRange.to} sessions={calendarSessions.data} firstDayOfWeek={firstDayOfWeek} />)}
+</>} analytics={<QuerySection query={analytics} title="Не удалось загрузить динамику тренировок">      <MetricGrid metrics={analytics.data?.comparison ? comparisonSummaryMetrics(analytics.data?.summary, analytics.data?.comparison) : summaryToMetrics(analytics.data?.summary)} />
+      <ExerciseProgress exercises={listItems(exercises.data)} />
+      <TrainingStreakCards streak={analytics.data?.streak} />
+      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+        <TrendChart title="Недельный объём" description="Завершённые рабочие и дроп-подходы по неделям." data={analytics.data?.weekly} series={[{ key: "volume_kg", label: "Объём, кг" }]} variant="bar" />
+        <TrendChart title="Длительность по дням" description="Суммарное фактическое время завершённых сессий, сгруппированное по локальной дате старта." data={analytics.data?.daily_duration} series={[{ key: "duration_minutes", label: "Минуты" }]} variant="area" />
+        <TrendChart title="Рабочие подходы" data={analytics.data?.daily} series={[{ key: "working_sets", label: "Рабочие подходы" }]} />
+        <TrendChart title="План и выполнение" description="Запланированные и выполненные тренировки. Перенос фактического старта не меняет исходную дату плана." data={analytics.data?.adherence} series={[{ key: "planned", label: "Запланировано" }, { key: "completed", label: "Выполнено", color: "var(--accent-blue)" }]} variant="bar" />
+      </div>
+      <ActivityHeatmap data={analytics.data?.heatmap} />
+      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+        <DistributionBars title="Рабочие подходы по мышечным группам" description="Каждый завершённый рабочий или дроп-подход учитывается по основной мышечной группе упражнения." data={analytics.data?.muscle_groups?.map((point) => ({ label: point.muscle_group || "Без группы", value: point.working_sets, detail: `${formatNumber(point.volume_kg, {}, " кг")}` }))} />
+        <DistributionBars title="Распределение RIR" description="Только завершённые рабочий или дроп-подходы с указанным фактическим RIR; дробные значения округлены до ближайшего целого." data={analytics.data?.rir_distribution?.map((point) => ({ label: `RIR ${point.rir}`, value: point.sets }))} accent="blue" />
+      </div>
+</QuerySection>} />
       <WorkoutForm open={formOpen} onOpenChange={(value) => { setFormOpen(value); if (!value) setEditing(null); }} session={editing} />
       <InlineError error={remove.error} />
       <ConfirmDialog open={Boolean(deleting)} onOpenChange={(open) => { if (!open) setDeleting(null); }} title="Удалить тренировку?" description="Сессия и её подходы будут удалены. Это действие нельзя отменить." onConfirm={() => deleting && remove.mutate(deleting.id)} busy={remove.isPending} error={remove.error} />

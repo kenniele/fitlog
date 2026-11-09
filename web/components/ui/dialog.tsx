@@ -24,6 +24,8 @@ export function Dialog({ open, onOpenChange, title, description, children, class
   const [mounted, setMounted] = useState(false);
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const changeRef = useRef(onOpenChange);
+  useEffect(() => { changeRef.current = onOpenChange; }, [onOpenChange]);
   const titleId = useId();
   const descriptionId = useId();
 
@@ -55,7 +57,7 @@ export function Dialog({ open, onOpenChange, title, description, children, class
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onOpenChange(false);
+        changeRef.current(false);
         return;
       }
       if (event.key !== "Tab") return;
@@ -93,7 +95,7 @@ export function Dialog({ open, onOpenChange, title, description, children, class
       }
       if (previouslyFocused?.isConnected) previouslyFocused.focus();
     };
-  }, [mounted, onOpenChange, open]);
+  }, [mounted, open]);
 
   if (!open || !mounted) return null;
 
@@ -110,6 +112,10 @@ export function Dialog({ open, onOpenChange, title, description, children, class
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
+        onInvalidCapture={(event) => {
+          let element: HTMLElement | null = event.target as HTMLElement;
+          while (element) { if (element instanceof HTMLDetailsElement) element.open = true; element = element.parentElement; }
+        }}
         tabIndex={-1}
         className={cn("dialog-enter overflow-y-auto overscroll-contain border border-line bg-surface shadow-2xl", placement === "left" ? "h-[100dvh] max-h-none w-[min(86vw,280px)] rounded-none border-y-0 border-l-0" : "max-h-[94dvh] w-full rounded-t-[16px] sm:max-w-2xl sm:rounded-card", className)}
       >

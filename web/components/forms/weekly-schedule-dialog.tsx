@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEditorClose } from "@/lib/use-editor-close";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarCheck2, CalendarDays, Clock3 } from "lucide-react";
@@ -156,7 +157,9 @@ export function WeeklyScheduleDialog({ plan, open, onOpenChange }: { plan?: Work
     onOpenChange(value);
   };
 
-  return <Dialog open={open} onOpenChange={handleOpenChange} title={plan ? `Расписание: ${plan.name}` : "Недельное расписание"} description="Каждый активный шаблон станет отдельной scheduled session с независимым snapshot prescription." className="sm:max-w-3xl">
+  const close = useEditorClose(open, !save.isSuccess && (previouslyCreated > 0 || JSON.stringify(rows) !== JSON.stringify(firstDayOfWeek === null ? [] : weeklyScheduleDefaults(plan, today, firstDayOfWeek))), save.isPending, handleOpenChange);
+
+  return <Dialog open={open} onOpenChange={close} title={plan ? `Расписание: ${plan.name}` : "Недельное расписание"} description="Выберите даты и время. Для каждой тренировки сохранятся упражнения и плановые подходы." className="sm:max-w-3xl">
     {save.isSuccess ? <div className="rounded-card border border-accent/20 bg-accent/[.055] p-5 text-center"><span className="mx-auto flex size-11 items-center justify-center rounded-full border border-accent/25 bg-accent/10"><CalendarCheck2 aria-hidden className="size-5 text-accent" /></span><h3 className="mt-3 text-base font-semibold text-ink">Неделя добавлена в расписание</h3><p className="mt-1 text-sm text-muted">Создано: {previouslyCreated + save.data} {plural(previouslyCreated + save.data, "сессия", "сессии", "сессий")}. Упражнения и плановые подходы сохранены в расписании.</p><div className="mt-5 flex flex-col-reverse justify-center gap-2 sm:flex-row"><Button type="button" variant="ghost" onClick={() => handleOpenChange(false)}>Закрыть</Button><Link href={calendarHref} onClick={() => handleOpenChange(false)} className="inline-flex h-10 items-center justify-center gap-2 rounded-control border border-accent/30 bg-accent px-4 text-sm font-medium text-[var(--accent-ink)] transition hover:brightness-110"><CalendarDays aria-hidden className="size-4" />Открыть календарь</Link></div></div> : <>
       <div className="mb-4 flex items-center justify-between gap-3 rounded-control border border-line bg-canvas/40 px-3 py-2"><span className="text-xs text-muted">Часовой пояс: {timeZone}</span><Badge tone="blue">{rows.length} {plural(rows.length, "шаблон", "шаблона", "шаблонов")}</Badge></div>
       <div className="space-y-2">
@@ -171,7 +174,7 @@ export function WeeklyScheduleDialog({ plan, open, onOpenChange }: { plan?: Work
       {validationError ? <p role="alert" className="mt-4 rounded-control border border-critical/20 bg-critical/10 px-3 py-2 text-sm text-critical">{validationError}</p> : null}
       <InlineError error={settingsError} />
       <InlineError error={save.error} />
-      <DialogActions><Button type="button" variant="ghost" onClick={() => handleOpenChange(false)}>Отмена</Button><Button type="button" variant="primary" loading={save.isPending} disabled={!rows.length || settings.isPending || Boolean(settingsError)} onClick={submit}><CalendarCheck2 aria-hidden className="size-4" />Добавить {rows.length} {plural(rows.length, "тренировку", "тренировки", "тренировок")}</Button></DialogActions>
+      <DialogActions><Button type="button" variant="ghost" onClick={() => close(false)}>Отмена</Button><Button type="button" variant="primary" loading={save.isPending} disabled={!rows.length || settings.isPending || Boolean(settingsError)} onClick={submit}><CalendarCheck2 aria-hidden className="size-4" />Добавить {rows.length} {plural(rows.length, "тренировку", "тренировки", "тренировок")}</Button></DialogActions>
     </>}
   </Dialog>;
 }

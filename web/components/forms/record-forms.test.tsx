@@ -20,8 +20,10 @@ describe("BodyForm", () => {
     const user = userEvent.setup();
     render(<QueryClientProvider client={client}><BodyForm open onOpenChange={vi.fn()} /></QueryClientProvider>);
 
+    await user.click(screen.getByText("Остальные показатели InBody"));
+    await user.click(screen.getByText("Сегментарный анализ"));
     await user.type(screen.getByLabelText("Базовый обмен, ккал"), "1780");
-    await user.type(screen.getAllByLabelText("Lean, кг")[0], "3.9");
+    await user.type(screen.getAllByLabelText("Безжировая масса, кг")[1], "3.9");
     await user.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() => expect(payload).toBeDefined());

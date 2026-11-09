@@ -7,11 +7,12 @@ import { Moon, Pencil, Plus, Trash2 } from "lucide-react";
 import { apiFetch, listItems, type ListResponse } from "@/lib/api";
 import type { AnalyticsResponse, RecoveryEntry, SeriesPoint, Settings, SleepEntry } from "@/lib/types";
 import { useQuickAction, useRangeSearch } from "@/lib/hooks";
+import { JournalSections, QuerySection } from "@/components/ui/journal-sections";
 import { PageHeader, SectionHeader } from "@/components/ui/page";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
-import { ErrorState, InlineError, PageSkeleton } from "@/components/ui/states";
+import { InlineError, PageSkeleton } from "@/components/ui/states";
 import { MetricGrid } from "@/components/charts/metric-card";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { MetricSwitcherChart } from "@/components/charts/metric-switcher-chart";
@@ -47,6 +48,8 @@ function RecoveryContent() {
   const [deleting, setDeleting] = useState<{ kind: "recovery" | "sleep"; id: string | number } | null>(null);
   const open = useCallback(() => { setEditingRecovery(null); setRecoveryOpen(true); }, []);
   useQuickAction(open);
+  const openSleep = useCallback(() => { setEditingSleep(null); setSleepOpen(true); }, []);
+  useQuickAction(openSleep, "sleep");
   useEffect(() => { setRecoveryPage(1); setSleepPage(1); }, [range]);
 
   const analytics = useQuery({ queryKey: ["analytics-recovery", range], queryFn: () => apiFetch<AnalyticsResponse>(`/analytics/recovery?${range}`) });
@@ -59,7 +62,7 @@ function RecoveryContent() {
     { accessorKey: "date", header: "Дата", cell: ({ getValue }) => formatDate(getValue<string>()) },
     { accessorKey: "recovery_score", header: "Восстановление", cell: ({ getValue }) => formatPercent(getValue<number | null>()) },
     { accessorKey: "hrv_ms", header: "HRV", cell: ({ getValue }) => formatNumber(getValue<number | null>(), {}, " мс") },
-    { accessorKey: "resting_heart_rate_bpm", header: "RHR", cell: ({ getValue }) => formatNumber(getValue<number | null>(), {}, " bpm") },
+    { accessorKey: "resting_heart_rate_bpm", header: "Пульс в покое", cell: ({ getValue }) => formatNumber(getValue<number | null>(), {}, " bpm") },
     { accessorKey: "daily_strain", header: "Нагрузка", cell: ({ getValue }) => formatNumber(getValue<number | null>()) },
     { accessorKey: "source", header: "Источник", cell: ({ getValue }) => <Badge>{String(getValue() ?? "Без данных")}</Badge> },
     { id: "actions", header: "", cell: ({ row }) => <div className="flex justify-end gap-1"><Button variant="ghost" size="icon" aria-label="Редактировать восстановление" onClick={() => { setEditingRecovery(row.original); setRecoveryOpen(true); }}><Pencil className="size-4" /></Button><Button variant="ghost" size="icon" aria-label="Удалить восстановление" onClick={() => setDeleting({ kind: "recovery", id: row.original.id })}><Trash2 className="size-4" /></Button></div> },
@@ -67,18 +70,16 @@ function RecoveryContent() {
   const sleepColumns = useMemo<ColumnDef<SleepEntry>[]>(() => [
     { accessorKey: "date", header: "Дата", cell: ({ row }) => formatDate(row.original.date ?? row.original.sleep_start) },
     { accessorKey: "actual_sleep_seconds", header: "Сон", cell: ({ getValue }) => formatDuration(getValue<number | null>()) },
-    { accessorKey: "sleep_performance_percent", header: "Performance", cell: ({ getValue }) => formatPercent(getValue<number | null>()) },
-    { accessorKey: "efficiency_percent", header: "Efficiency", cell: ({ getValue }) => formatPercent(getValue<number | null>()) },
+    { accessorKey: "sleep_performance_percent", header: "Выполнение нормы", cell: ({ getValue }) => formatPercent(getValue<number | null>()) },
+    { accessorKey: "efficiency_percent", header: "Эффективность", cell: ({ getValue }) => formatPercent(getValue<number | null>()) },
     { accessorKey: "deep_seconds", header: "Deep", cell: ({ getValue }) => formatDuration(getValue<number | null>()) },
     { accessorKey: "rem_seconds", header: "REM", cell: ({ getValue }) => formatDuration(getValue<number | null>()) },
     { id: "actions", header: "", cell: ({ row }) => <div className="flex justify-end gap-1"><Button variant="ghost" size="icon" aria-label="Редактировать сон" onClick={() => { setEditingSleep(row.original); setSleepOpen(true); }}><Pencil className="size-4" /></Button><Button variant="ghost" size="icon" aria-label="Удалить сон" onClick={() => setDeleting({ kind: "sleep", id: row.original.id })}><Trash2 className="size-4" /></Button></div> },
   ], []);
 
-  if (analytics.isError || recovery.isError || sleep.isError || settings.isError) return <ErrorState error={analytics.error ?? recovery.error ?? sleep.error ?? settings.error} retry={() => { void Promise.all([analytics.refetch(), recovery.refetch(), sleep.refetch(), settings.refetch()]); }} />;
-  if (analytics.isPending || recovery.isPending || sleep.isPending || settings.isPending) return <PageSkeleton />;
 
-  const daily = analytics.data.daily ?? analytics.data.series ?? [];
-  const thresholds = recoveryThresholds(settings.data);
+  const daily = analytics.data?.daily ?? analytics.data?.series ?? [];
+  const thresholds = recoveryThresholds(settings.data ?? {});
   const lowLabel = `0–${formatNumber(thresholds.low, { maximumFractionDigits: 1 })}`;
   const middleLabel = `${formatNumber(thresholds.low, { maximumFractionDigits: 1 })}–${formatNumber(thresholds.high, { maximumFractionDigits: 1 })}`;
   const highLabel = `${formatNumber(thresholds.high, { maximumFractionDigits: 1 })}–100`;
@@ -92,29 +93,30 @@ function RecoveryContent() {
 
   return <>
     <PageHeader eyebrow="WHOOP" title="Восстановление и сон" description="Дневные показатели, структура сна и средние за 7 и 28 дней." actions={<><Button onClick={() => { setEditingSleep(null); setSleepOpen(true); }}><Moon className="size-4" />Сон</Button><Button variant="primary" onClick={() => { setEditingRecovery(null); setRecoveryOpen(true); }}><Plus className="size-4" />Восстановление</Button></>} />
-    <MetricGrid metrics={analytics.data.comparison ? comparisonSummaryMetrics(analytics.data.summary, analytics.data.comparison) : summaryToMetrics(analytics.data.summary)} />
+    <JournalSections journal={<><QuerySection query={recovery} title="Не удалось загрузить записи">    <Card><div className="border-b border-line p-4 text-sm font-semibold">Ежедневное восстановление</div><DataTable data={listItems(recovery.data)} columns={recoveryColumns} /><Pagination data={recovery.data} page={recoveryPage} onPageChange={setRecoveryPage} disabled={recovery.isFetching} /></Card></QuerySection>
+<QuerySection query={sleep} title="Не удалось загрузить записи">    <Card><div className="border-b border-line p-4 text-sm font-semibold">Записи сна</div><DataTable data={listItems(sleep.data)} columns={sleepColumns} /><Pagination data={sleep.data} page={sleepPage} onPageChange={setSleepPage} disabled={sleep.isFetching} /></Card></QuerySection></>} analytics={<QuerySection query={analytics} title="Не удалось загрузить динамику восстановления"><QuerySection query={settings} title="Не удалось загрузить зоны восстановления">    <MetricGrid metrics={analytics.data?.comparison ? comparisonSummaryMetrics(analytics.data?.summary, analytics.data?.comparison) : summaryToMetrics(analytics.data?.summary)} />
 
     <MetricSwitcherChart title="Восстановление и физиология" description="Показывается одна шкала за раз." data={daily} metrics={[
       { key: "recovery_score", label: "Восстановление", variant: "area" },
       { key: "hrv_ms", label: "HRV" },
-      { key: "resting_heart_rate_bpm", label: "RHR" },
-      { key: "respiratory_rate", label: "Respiratory" },
+      { key: "resting_heart_rate_bpm", label: "Пульс в покое" },
+      { key: "respiratory_rate", label: "Дыхание" },
       { key: "spo2_percent", label: "SpO₂" },
-      { key: "skin_temperature_celsius", label: "Skin temp" },
+      { key: "skin_temperature_celsius", label: "Температура кожи" },
       { key: "daily_strain", label: "Нагрузка", variant: "bar" },
     ]} />
 
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
       <TrendChart title="HRV и средние значения" description="Измерения HRV и средние за полные 7 и 28 дней." data={daily} series={[{ key: "hrv_ms", label: "HRV" }, { key: "hrv_7d_average", label: "7 дней", color: "var(--accent-blue)" }, { key: "hrv_28d_average", label: "28 дней", color: "var(--warning)" }]} />
-      <TrendChart title="Пульс покоя и средние значения" description="Пульс покоя относительно средних за 7 и 28 дней." data={daily} series={[{ key: "resting_heart_rate_bpm", label: "RHR" }, { key: "rhr_7d_average", label: "7 дней", color: "var(--accent-blue)" }, { key: "rhr_28d_average", label: "28 дней", color: "var(--warning)" }]} />
+      <TrendChart title="Пульс покоя и средние значения" description="Пульс покоя относительно средних за 7 и 28 дней." data={daily} series={[{ key: "resting_heart_rate_bpm", label: "Пульс в покое" }, { key: "rhr_7d_average", label: "7 дней", color: "var(--accent-blue)" }, { key: "rhr_28d_average", label: "28 дней", color: "var(--warning)" }]} />
       <TrendChart title="Структура сна" description="Продолжительность быстрого, глубокого и лёгкого сна, а также бодрствования." data={daily} series={[{ key: "rem_seconds", label: "REM" }, { key: "deep_seconds", label: "Глубокий сон", color: "var(--accent-blue)" }, { key: "light_seconds", label: "Лёгкий сон", color: "var(--warning)" }, { key: "awake_seconds", label: "Бодрствование", color: "var(--critical)" }]} variant="bar" />
       <MetricSwitcherChart title="Качество и долг сна" data={daily} metrics={[
         { key: "sleep_seconds", label: "Сон", variant: "area" },
         { key: "time_in_bed_seconds", label: "В постели", variant: "area" },
-        { key: "sleep_performance_percent", label: "Performance" },
-        { key: "sleep_efficiency_percent", label: "Efficiency" },
-        { key: "consistency_percent", label: "Consistency" },
-        { key: "sleep_debt_seconds", label: "Sleep debt", variant: "bar" },
+        { key: "sleep_performance_percent", label: "Выполнение нормы" },
+        { key: "sleep_efficiency_percent", label: "Эффективность" },
+        { key: "consistency_percent", label: "Регулярность" },
+        { key: "sleep_debt_seconds", label: "Дефицит сна", variant: "bar" },
       ]} />
       <TrendChart title="Распределение восстановления" description={`Количество дней в сохранённых диапазонах: ниже ${formatNumber(thresholds.low)}, ${formatNumber(thresholds.low)}–${formatNumber(thresholds.high)} и от ${formatNumber(thresholds.high)}.`} data={recoveryDistribution} series={[{ key: "days", label: "Дни" }]} variant="bar" />
       <CalendarHeatmap title="Календарь восстановления" description="Насыщенность клетки показывает уровень восстановления; пустая клетка — без данных." data={daily} dataKey="recovery_score" unit="%" />
@@ -130,8 +132,7 @@ function RecoveryContent() {
       </div>
     </section>
 
-    <Card><div className="border-b border-line p-4 text-sm font-semibold">Ежедневное восстановление</div><DataTable data={listItems(recovery.data)} columns={recoveryColumns} /><Pagination data={recovery.data} page={recoveryPage} onPageChange={setRecoveryPage} disabled={recovery.isFetching} /></Card>
-    <Card><div className="border-b border-line p-4 text-sm font-semibold">Записи сна</div><DataTable data={listItems(sleep.data)} columns={sleepColumns} /><Pagination data={sleep.data} page={sleepPage} onPageChange={setSleepPage} disabled={sleep.isFetching} /></Card>
+</QuerySection></QuerySection>} />
     <RecoveryForm open={recoveryOpen} onOpenChange={(value) => { setRecoveryOpen(value); if (!value) setEditingRecovery(null); }} entry={editingRecovery} />
     <SleepForm open={sleepOpen} onOpenChange={(value) => { setSleepOpen(value); if (!value) setEditingSleep(null); }} entry={editingSleep} />
     <InlineError error={remove.error} />

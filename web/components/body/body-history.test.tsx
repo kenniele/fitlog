@@ -1,7 +1,9 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BodyHistory, BodyMeasurementDetails, bodyHistoryPath } from "./body-history";
 import type { BodyMeasurement } from "@/lib/types";
+
+afterEach(cleanup);
 
 const measurement: BodyMeasurement = {
   id: 7,
@@ -32,7 +34,7 @@ describe("Body history", () => {
     expect(within(segment!).getByText("5,02 кг")).toBeInTheDocument();
   });
 
-  it("exposes all records, the InBody filter and a full-row viewer", async () => {
+  it.each(["mobile", "desktop"])("exposes records and the full measurement viewer in %s layout", async (layout) => {
     const onScopeChange = vi.fn();
     render(<BodyHistory
       data={{ items: [measurement], total: 1, page: 1, page_size: 25 }}
@@ -47,7 +49,8 @@ describe("Body history", () => {
     expect(screen.getByText(/за всё время/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Только InBody" }));
     expect(onScopeChange).toHaveBeenCalledWith("inbody");
-    fireEvent.click(screen.getByRole("button", { name: "Просмотреть измерение" }));
+    const records = screen.getByRole(layout === "mobile" ? "article" : "table");
+    fireEvent.click(within(records).getByRole("button", { name: "Просмотреть измерение" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByText("External ID: inbody-2026-08-07")).toBeInTheDocument();

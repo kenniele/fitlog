@@ -1,5 +1,7 @@
 "use client";
 
+import { notifySaved } from "@/components/ui/save-notice";
+import { useEditorClose } from "@/lib/use-editor-close";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -73,9 +75,10 @@ export function ExerciseForm({ open, onOpenChange, exercise }: { open: boolean; 
         external_id: values.external_id?.trim() || null,
       },
     }),
-    onSuccess: async () => { await client.invalidateQueries(); onOpenChange(false); },
+    onSuccess: async () => { await client.invalidateQueries(); notifySaved(); onOpenChange(false); },
   });
-  return <Dialog open={open} onOpenChange={onOpenChange} title={exercise ? "Редактировать упражнение" : "Новое упражнение"} className="sm:max-w-2xl"><form onSubmit={form.handleSubmit((values) => save.mutate(values))} className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><Field label="Название" error={form.formState.errors.name?.message}><Input autoFocus {...form.register("name")} /></Field><Field label="Slug"><Input {...form.register("slug")} /></Field><Field label="Основная мышечная группа"><Input {...form.register("primary_muscle_group")} /></Field><Field label="Дополнительные группы" hint="Через запятую"><Input {...form.register("secondary_muscle_groups")} /></Field><Field label="Тип упражнения"><Input {...form.register("exercise_type")} /></Field><Field label="Оборудование"><Input {...form.register("equipment")} /></Field><Field label="Источник"><Select {...form.register("source")}><option value="manual">Вручную</option><option value="csv">CSV</option><option value="json">JSON</option><option value="whoop">WHOOP</option><option value="fatsecret">FatSecret</option></Select></Field><Field label="External ID"><Input {...form.register("external_id")} /></Field></div><Checkbox label="Одностороннее упражнение" {...form.register("unilateral")} /><Field label="Заметка"><Textarea {...form.register("notes")} /></Field><InlineError error={save.error} /><DialogActions><Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Отмена</Button><Button variant="primary" type="submit" loading={save.isPending}>Сохранить</Button></DialogActions></form></Dialog>;
+  const close = useEditorClose(open, form.formState.isDirty, save.isPending, onOpenChange);
+  return <Dialog open={open} onOpenChange={close} title={exercise ? "Редактировать упражнение" : "Новое упражнение"} className="sm:max-w-2xl"><form onSubmit={form.handleSubmit((values) => save.mutate(values))} className="space-y-4"><fieldset disabled={save.isPending} className="min-w-0 space-y-5"><div className="grid gap-4 sm:grid-cols-2"><Field label="Название" error={form.formState.errors.name?.message}><Input autoFocus {...form.register("name")} /></Field><Field label="Код упражнения"><Input {...form.register("slug")} /></Field><Field label="Основная мышечная группа"><Input {...form.register("primary_muscle_group")} /></Field><Field label="Дополнительные группы" hint="Через запятую"><Input {...form.register("secondary_muscle_groups")} /></Field><Field label="Тип упражнения"><Input {...form.register("exercise_type")} /></Field><Field label="Оборудование"><Input {...form.register("equipment")} /></Field><Field label="Источник"><Select {...form.register("source")}><option value="manual">Вручную</option><option value="csv">CSV</option><option value="json">JSON</option><option value="whoop">WHOOP</option><option value="fatsecret">FatSecret</option></Select></Field><Field label="ID во внешнем источнике"><Input {...form.register("external_id")} /></Field></div><Checkbox label="Одностороннее упражнение" {...form.register("unilateral")} /><Field label="Заметка"><Textarea {...form.register("notes")} /></Field><InlineError error={save.error} /><DialogActions><Button type="button" variant="ghost" onClick={() => close(false)}>Отмена</Button><Button variant="primary" type="submit" loading={save.isPending}>Сохранить</Button></DialogActions></fieldset></form></Dialog>;
 }
 
 type PlanValues = { name: string; description?: string; days_per_week?: number };
@@ -118,10 +121,10 @@ const planExerciseDraftSchema = z.object({
     exercise.target_rir != null || exercise.weight_step_kg != null || exercise.starting_weight_kg != null ||
     Boolean(exercise.progression_type) || Boolean(exercise.warmup_sets?.length);
   if (structured) {
-    if (exercise.working_sets == null) context.addIssue({ code: "custom", path: ["working_sets"], message: "для structured progression укажите рабочие подходы" });
-    if (exercise.min_reps == null) context.addIssue({ code: "custom", path: ["min_reps"], message: "для structured progression укажите минимум повторов" });
-    if (exercise.max_reps == null) context.addIssue({ code: "custom", path: ["max_reps"], message: "для structured progression укажите максимум повторов" });
-    if (exercise.weight_step_kg == null) context.addIssue({ code: "custom", path: ["weight_step_kg"], message: "для structured progression укажите шаг веса" });
+    if (exercise.working_sets == null) context.addIssue({ code: "custom", path: ["working_sets"], message: "для правила прогрессии укажите рабочие подходы" });
+    if (exercise.min_reps == null) context.addIssue({ code: "custom", path: ["min_reps"], message: "для правила прогрессии укажите минимум повторов" });
+    if (exercise.max_reps == null) context.addIssue({ code: "custom", path: ["max_reps"], message: "для правила прогрессии укажите максимум повторов" });
+    if (exercise.weight_step_kg == null) context.addIssue({ code: "custom", path: ["weight_step_kg"], message: "для правила прогрессии укажите шаг веса" });
   }
 });
 
@@ -155,12 +158,15 @@ export function PlanForm({ open, onOpenChange, plan }: { open: boolean; onOpenCh
   const client = useQueryClient();
   const form = useForm<PlanValues>({ resolver: zodResolver(planSchema), defaultValues: { name: "", description: "", days_per_week: 3 } });
   const [templates, setTemplates] = useState<DraftTemplate[]>(makeTemplates(plan));
+  const [templateBaseline, setTemplateBaseline] = useState(JSON.stringify(templates));
   const [templateErrors, setTemplateErrors] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
     form.reset({ name: plan?.name ?? "", description: plan?.description ?? "", days_per_week: plan?.days_per_week ?? 3 });
-    setTemplates(makeTemplates(plan));
+    const nextTemplates = makeTemplates(plan);
+    setTemplates(nextTemplates);
+    setTemplateBaseline(JSON.stringify(nextTemplates));
     setTemplateErrors([]);
   }, [form, open, plan]);
 
@@ -195,8 +201,10 @@ export function PlanForm({ open, onOpenChange, plan }: { open: boolean; onOpenCh
         })),
       },
     }),
-    onSuccess: async () => { await client.invalidateQueries(); onOpenChange(false); },
+    onSuccess: async () => { await client.invalidateQueries(); notifySaved(); onOpenChange(false); },
   });
+
+  const close = useEditorClose(open, form.formState.isDirty || JSON.stringify(templates) !== templateBaseline, save.isPending, onOpenChange);
 
   const patchTemplate = (index: number, changes: Partial<DraftTemplate>) => setTemplates((current) => current.map((template, position) => position === index ? { ...template, ...changes } : template));
   const move = (index: number, by: number) => setTemplates((current) => {
@@ -256,8 +264,8 @@ export function PlanForm({ open, onOpenChange, plan }: { open: boolean; onOpenCh
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title={plan ? "Редактировать программу" : "Новая программа тренировок"} description="Дайте программе название, добавьте тренировки и задайте упражнения для каждой." className="sm:max-w-6xl">
-      <form onSubmit={form.handleSubmit(submitPlan)} className="space-y-5">
+    <Dialog open={open} onOpenChange={close} title={plan ? "Редактировать программу" : "Новая программа тренировок"} description="Дайте программе название, добавьте тренировки и задайте упражнения для каждой." className="sm:max-w-6xl">
+      <form onSubmit={form.handleSubmit(submitPlan)} className="space-y-5"><fieldset disabled={save.isPending} className="min-w-0 space-y-5">
         <div className="grid gap-4 sm:grid-cols-[1fr_160px]">
           <Field label="Название" error={form.formState.errors.name?.message}><Input {...form.register("name")} /></Field>
           <Field label="Дней в неделю"><Input type="number" min="1" max="7" {...form.register("days_per_week", { setValueAs: (value) => value === "" ? undefined : Number(value) })} /></Field>
@@ -291,7 +299,7 @@ export function PlanForm({ open, onOpenChange, plan }: { open: boolean; onOpenCh
                       </div>
                     </div>
                     <div className="mt-3 grid gap-2 md:grid-cols-4">
-                      <Field label="Шаг веса, кг" hint="Обязателен для structured progression"><Input type="number" min="0.01" step="0.01" value={exercise.weight_step_kg ?? ""} onChange={(event) => patchExercise(templateIndex, exerciseIndex, { weight_step_kg: optionalInputNumber(event.target.value) })} /></Field>
+                      <Field label="Шаг веса, кг" hint="Обязателен для правила прогрессии"><Input type="number" min="0.01" step="0.01" value={exercise.weight_step_kg ?? ""} onChange={(event) => patchExercise(templateIndex, exerciseIndex, { weight_step_kg: optionalInputNumber(event.target.value) })} /></Field>
                       <Field label="Стартовый вес, кг"><Input type="number" min="0.01" step="0.01" value={exercise.starting_weight_kg ?? ""} onChange={(event) => patchExercise(templateIndex, exerciseIndex, { starting_weight_kg: optionalInputNumber(event.target.value) })} /></Field>
                       <Field label="Прогрессия"><Select value={exercise.progression_type ?? ""} onChange={(event) => patchExercise(templateIndex, exerciseIndex, { progression_type: event.target.value || null })}><option value="">Без прогрессии</option><option value="double">Double progression</option></Select></Field>
                       <Field label="Заметка"><Input value={exercise.notes ?? ""} onChange={(event) => patchExercise(templateIndex, exerciseIndex, { notes: event.target.value })} /></Field>
@@ -312,8 +320,8 @@ export function PlanForm({ open, onOpenChange, plan }: { open: boolean; onOpenCh
         </div>
         {templateErrors.length > 0 && <div role="alert" className="rounded-control border border-critical/20 bg-critical/10 px-3 py-2 text-sm text-critical"><p className="font-medium">Проверьте структуру плана</p><ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">{templateErrors.map((error) => <li key={error}>{error}</li>)}</ul></div>}
         <InlineError error={save.error} />
-        <DialogActions><Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Отмена</Button><Button type="submit" variant="primary" loading={save.isPending}>Сохранить план</Button></DialogActions>
-      </form>
+        <DialogActions><Button type="button" variant="ghost" onClick={() => close(false)}>Отмена</Button><Button type="submit" variant="primary" loading={save.isPending}>Сохранить план</Button></DialogActions>
+      </fieldset></form>
     </Dialog>
   );
 }

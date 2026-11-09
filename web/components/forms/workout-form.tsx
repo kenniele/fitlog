@@ -1,5 +1,7 @@
 "use client";
 
+import { notifySaved } from "@/components/ui/save-notice";
+import { useEditorClose } from "@/lib/use-editor-close";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
@@ -320,8 +322,10 @@ export function WorkoutForm({ open, onOpenChange, session, initialPlan }: { open
       }
       return apiFetch(`/workout-sessions${session ? `/${session.id}` : ""}`, { method: session ? "PUT" : "POST", body });
     },
-    onSuccess: async () => { await client.invalidateQueries(); onOpenChange(false); },
+    onSuccess: async () => { await client.invalidateQueries(); notifySaved(); onOpenChange(false); },
   });
+
+  const close = useEditorClose(open, form.formState.isDirty, save.isPending, onOpenChange);
 
   const handleDateChange = (nextDate: string) => {
     const previousDate = form.getValues("date") || nextDate;
@@ -391,14 +395,14 @@ export function WorkoutForm({ open, onOpenChange, session, initialPlan }: { open
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title={session ? "Редактировать тренировку" : initialPlan ? `Запланировать: ${initialPlan.name}` : "Новая тренировка"} description="Завершённая тренировка сразу участвует в аналитике; планы и пропуски сохраняют scheduled_at." className="sm:max-w-4xl">
+    <Dialog open={open} onOpenChange={close} title={session ? "Редактировать тренировку" : initialPlan ? `Запланировать: ${initialPlan.name}` : "Новая тренировка"} description="Запишите результат или запланируйте тренировку. Статус можно изменить позже." className="sm:max-w-4xl">
       <form onSubmit={form.handleSubmit((values) => {
           if (!snapshotProtected && values.plan_id && !values.template_id) {
             form.setError("template_id", { message: "Выберите тренировку программы" });
             return;
           }
           save.mutate(values);
-        })} className="space-y-5">
+        })} className="space-y-5"><fieldset disabled={save.isPending} className="min-w-0 space-y-5">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="Дата" error={form.formState.errors.date?.message}><Input type="date" {...form.register("date")} onChange={(event) => handleDateChange(event.target.value)} /></Field>
           <Field label="Статус"><Select {...form.register("status")} onChange={(event) => handleStatusChange(event.target.value as WorkoutStatus)}><option value="finished">Завершена</option><option value="active">Активна</option><option value="scheduled">Запланирована</option><option value="cancelled">Отменена</option><option value="excused">Пропущена по причине</option></Select></Field>
@@ -459,8 +463,8 @@ export function WorkoutForm({ open, onOpenChange, session, initialPlan }: { open
           </div>
 
         <InlineError error={save.error} />
-        <DialogActions><Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Отмена</Button><Button type="submit" variant="primary" loading={save.isPending}>{session ? "Сохранить изменения" : "Создать тренировку"}</Button></DialogActions>
-      </form>
+        <DialogActions><Button type="button" variant="ghost" onClick={() => close(false)}>Отмена</Button><Button type="submit" variant="primary" loading={save.isPending}>{session ? "Сохранить изменения" : "Создать тренировку"}</Button></DialogActions>
+      </fieldset></form>
     </Dialog>
   );
 }

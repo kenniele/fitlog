@@ -5,6 +5,21 @@ import { APIError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+function readableError(error: unknown) {
+  if (error instanceof Error && /[А-Яа-яЁё]/.test(error.message)) return error.message;
+  if (error instanceof APIError) {
+    if (error.status === 401) return "Сеанс завершён. Войдите снова.";
+    if (error.status === 403) return "Нет доступа к этому действию.";
+    if (error.status === 404) return "Запись не найдена. Возможно, она была удалена.";
+    if (error.status === 409) return "Данные изменились. Обновите запись и повторите действие.";
+    if (error.status === 429) return "Слишком много запросов. Подождите немного и повторите.";
+    if (error.status < 500) return "Проверьте заполненные поля и повторите действие.";
+    return "Сервис временно недоступен. Повторите попытку позже.";
+  }
+  if (error instanceof TypeError) return "Не удалось связаться с FitLog. Проверьте подключение и повторите попытку.";
+  return "Не удалось выполнить действие. Повторите попытку.";
+}
+
 export function Skeleton({ className }: { className?: string }) {
   return (
     <div
@@ -61,12 +76,7 @@ export function ErrorState({
   retry?: () => void;
   title?: string;
 }) {
-  const message =
-    error instanceof APIError
-      ? error.message
-      : error instanceof Error
-        ? error.message
-        : "Неизвестная ошибка";
+  const message = readableError(error);
   return (
     <div
       role="alert"
@@ -89,8 +99,7 @@ export function ErrorState({
 
 export function InlineError({ error }: { error: unknown }) {
   if (!error) return null;
-  const message =
-    error instanceof Error ? error.message : "Не удалось выполнить действие";
+  const message = readableError(error);
   const fields =
     error instanceof APIError && error.fields
       ? Object.entries(error.fields).flatMap(([field, value]) => {

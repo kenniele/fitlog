@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 describe("SettingsPage query errors", () => {
-  it("shows a secondary sources failure and retries both page queries", async () => {
+  it("keeps preferences editable when sources fail and retries only sources", async () => {
     const requested: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
@@ -26,10 +26,14 @@ describe("SettingsPage query errors", () => {
     render(<QueryClientProvider client={client}><SettingsPage /></QueryClientProvider>);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Источники временно недоступны");
+    const calories = screen.getByLabelText("Калории, ккал");
+    await user.type(calories, "2300");
     await user.click(screen.getByRole("button", { name: "Повторить" }));
     await waitFor(() => {
-      expect(requested.filter((url) => url.endsWith("/settings"))).toHaveLength(2);
+      expect(requested.filter((url) => url.endsWith("/settings"))).toHaveLength(1);
       expect(requested.filter((url) => url.endsWith("/sources"))).toHaveLength(2);
     });
+    expect(calories).toHaveValue(2300);
+    expect(screen.getByRole("button", { name: "Сохранить настройки" })).toBeEnabled();
   });
 });

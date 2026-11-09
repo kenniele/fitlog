@@ -8,6 +8,7 @@ import { FileUp, Pencil, Plus, Trash2 } from "lucide-react";
 import { apiFetch, listItems, type ListResponse } from "@/lib/api";
 import type { AnalyticsResponse, NutritionDay, Settings } from "@/lib/types";
 import { useQuickAction, useRangeSearch } from "@/lib/hooks";
+import { JournalSections, QuerySection } from "@/components/ui/journal-sections";
 import { PageHeader } from "@/components/ui/page";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -54,16 +55,13 @@ function NutritionContent() {
     { id: "actions", header: "", cell: ({ row }) => <div className="flex justify-end gap-1"><Button variant="ghost" size="icon" aria-label="Редактировать питание" onClick={() => { setEditing(row.original); setForm(true); }}><Pencil className="size-4" /></Button><Button variant="ghost" size="icon" aria-label="Удалить питание" onClick={() => setDeleting(row.original)}><Trash2 className="size-4" /></Button></div> },
   ], []);
 
-  if (analytics.isError || days.isError || settings.isError) return <ErrorState error={analytics.error ?? days.error ?? settings.error} retry={() => { void Promise.all([analytics.refetch(), days.refetch(), settings.refetch()]); }} />;
-  if (analytics.isPending || days.isPending || settings.isPending) return <PageSkeleton />;
-  const firstDayOfWeek = parseFirstDayOfWeek(settings.data.first_day_of_week);
-  if (firstDayOfWeek === null) return <ErrorState error={new Error("В настройках указан некорректный первый день недели")} retry={() => { void settings.refetch(); }} />;
+  const firstDayOfWeek = parseFirstDayOfWeek(settings.data?.first_day_of_week);
 
-  const target = settings.data.calorie_target_kcal;
-  const proteinTarget = settings.data.protein_target_g;
-  const fatTarget = settings.data.fat_target_g;
-  const carbohydrateTarget = settings.data.carbohydrates_target_g;
-  const daily = (analytics.data.daily ?? analytics.data.series ?? []).map((point) => {
+  const target = settings.data?.calorie_target_kcal;
+  const proteinTarget = settings.data?.protein_target_g;
+  const fatTarget = settings.data?.fat_target_g;
+  const carbohydrateTarget = settings.data?.carbohydrates_target_g;
+  const daily = (analytics.data?.daily ?? analytics.data?.series ?? []).map((point) => {
     const calories = typeof point.calories_kcal === "number" ? point.calories_kcal : null;
     const adherence = calories !== null && target ? Math.max(0, 100 - Math.abs(calories - target) / target * 100) : null;
     return {
@@ -75,7 +73,7 @@ function NutritionContent() {
       target_adherence_percent: adherence,
     };
   });
-  const weekly = nutritionWeeklyAverages(daily, firstDayOfWeek);
+  const weekly = firstDayOfWeek === null ? [] : nutritionWeeklyAverages(daily, firstDayOfWeek);
   const macroTargetDescription = [
     proteinTarget ? `белки ${formatNumber(proteinTarget)} г` : null,
     fatTarget ? `жиры ${formatNumber(fatTarget)} г` : null,
@@ -84,11 +82,13 @@ function NutritionContent() {
 
   return <>
     <PageHeader eyebrow="Питание" title="Питание относительно целей" description="Дневные итоги, цели, недельные средние и соблюдение диапазона по сохранённым записям." actions={<><Link href="/dashboard/imports?action=new" className="inline-flex h-10 items-center gap-2 rounded-control border border-line bg-elevated px-4 text-sm font-medium text-ink transition hover:border-ink/15"><FileUp className="size-4" />Импорт</Link><Button variant="primary" onClick={() => { setEditing(null); setForm(true); }}><Plus className="size-4" />Дневной итог</Button></>} />
-    <MetricGrid metrics={analytics.data.comparison ? comparisonSummaryMetrics(analytics.data.summary, analytics.data.comparison) : summaryToMetrics(analytics.data.summary)} />
+    <Link href="/dashboard/settings" className="text-link">Настроить цели питания</Link>
+    <JournalSections journal={<QuerySection query={days} title="Не удалось загрузить записи питания">    <Card><DataTable data={listItems(days.data)} columns={columns} emptyTitle="Нет дневных итогов" /><Pagination data={days.data} page={page} onPageChange={setPage} disabled={days.isFetching} /></Card>
+</QuerySection>} analytics={<QuerySection query={analytics} title="Не удалось загрузить динамику питания"><QuerySection query={settings} title="Не удалось загрузить цели питания">{firstDayOfWeek === null ? <ErrorState error={new Error("Проверьте первый день недели в настройках")} /> : <>    <MetricGrid metrics={analytics.data?.comparison ? comparisonSummaryMetrics(analytics.data?.summary, analytics.data?.comparison) : summaryToMetrics(analytics.data?.summary)} />
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
       <TrendChart title="Калории относительно цели" description={target ? `Сохранённая цель: ${formatNumber(target)} ккал; целевой коридор аналитики — 90–110%.` : "Цель не задана: график показывает только фактическое потребление."} data={daily} series={[{ key: "calories_kcal", label: "Калории" }, { key: "calorie_target_kcal", label: "Цель", color: "var(--warning)" }]} />
       <TrendChart title="Макронутриенты относительно целей" description={macroTargetDescription ? `Пунктиром показаны сохранённые цели: ${macroTargetDescription}.` : "Задайте цели по белкам, жирам и углеводам в настройках, чтобы видеть отклонения."} data={daily} series={[{ key: "protein_g", label: "Белки", color: "var(--accent)" }, { key: "protein_target_g", label: "Цель белков", color: "var(--accent)", strokeDasharray: "5 4" }, { key: "fat_g", label: "Жиры", color: "var(--warning)" }, { key: "fat_target_g", label: "Цель жиров", color: "var(--warning)", strokeDasharray: "5 4" }, { key: "carbohydrates_g", label: "Углеводы", color: "var(--accent-blue)" }, { key: "carbohydrates_target_g", label: "Цель углеводов", color: "var(--accent-blue)", strokeDasharray: "5 4" }]} />
-      <TrendChart title="Недельные средние" description="Каждая точка — среднее только по имеющимся дневным записям недели с сохранённым первым днём." data={weekly} series={[{ key: "calories_kcal", label: "Калории" }, { key: "protein_g", label: "Белок", color: "var(--accent-blue)" }, { key: "fat_g", label: "Жиры", color: "var(--warning)" }, { key: "carbohydrates_g", label: "Углеводы", color: "var(--critical)" }]} />
+      <MetricSwitcherChart title="Недельные средние" description="Среднее по дням с записями. Выберите показатель: у каждого своя шкала." data={weekly} metrics={[{ key: "calories_kcal", label: "Калории, ккал" }, { key: "protein_g", label: "Белки, г" }, { key: "fat_g", label: "Жиры, г" }, { key: "carbohydrates_g", label: "Углеводы, г" }]} />
       <MetricSwitcherChart title="Дополнительные нутриенты" data={daily} metrics={[
         { key: "sugar_g", label: "Сахар", variant: "bar" },
         { key: "saturated_fat_g", label: "Насыщ. жиры", variant: "bar" },
@@ -99,7 +99,7 @@ function NutritionContent() {
       ]} />
       <CalendarHeatmap title="Соблюдение калорийной цели" description={target ? "100% означает точное попадание; насыщенность снижается с отклонением от цели." : "Задайте калорийную цель в настройках, чтобы рассчитать соблюдение."} data={target ? daily : []} dataKey="target_adherence_percent" unit="%" />
     </div>
-    <Card><DataTable data={listItems(days.data)} columns={columns} emptyTitle="Нет дневных итогов" /><Pagination data={days.data} page={page} onPageChange={setPage} disabled={days.isFetching} /></Card>
+</>}</QuerySection></QuerySection>} />
     <NutritionForm open={form} onOpenChange={(value) => { setForm(value); if (!value) setEditing(null); }} entry={editing} />
     <InlineError error={remove.error} />
     <ConfirmDialog open={Boolean(deleting)} onOpenChange={(value) => { if (!value) setDeleting(null); }} title="Удалить итог дня?" description="Эта точка исчезнет из всех графиков питания." onConfirm={() => deleting && remove.mutate(deleting.id)} busy={remove.isPending} error={remove.error} />

@@ -14,7 +14,8 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
-import { navigation } from "@/lib/navigation";
+import { SaveNotice } from "@/components/ui/save-notice";
+import { navigation, quickActions } from "@/lib/navigation";
 import { DateRangeControls } from "@/components/layout/date-range-controls";
 import { SourceStatus } from "@/components/layout/source-status";
 import { CommandPalette } from "@/components/layout/command-palette";
@@ -31,6 +32,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [expanded, setExpanded] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [palette, setPalette] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [appliedTimezone, setAppliedTimezone] = useState<string | null>(null);
   const login = pathname === "/dashboard/login";
   const rangeAware = [
@@ -208,14 +210,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               >
                 <Menu className="size-5" />
               </Button>
-              <span className="text-sm font-medium">
-                FitLog<span className="mx-3 text-muted/50">/</span>
+              <span className="min-w-0 truncate text-sm font-medium">
+                <span className="hidden sm:inline">FitLog<span className="mx-3 text-muted/50">/</span></span>
                 <span className="font-normal text-muted">
                   {current?.label ?? "Тренировка"}
                 </span>
               </span>
-              <div className="ml-auto flex items-center gap-2 sm:gap-4">
-                <SourceStatus />
+              <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-4">
+                <div className="hidden xl:block"><SourceStatus /></div>
                 <button
                   onClick={() => setPalette(true)}
                   className="quiet-control"
@@ -226,8 +228,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                   <kbd className="hidden text-xs text-muted lg:inline">⌘ K</kbd>
                 </button>
                 <Button
-                  onClick={() => setPalette(true)}
-                  className="hidden sm:inline-flex"
+                  onClick={() => setAdding(true)}
+                  aria-label="Добавить запись"
                 >
                   <Plus className="size-4" />
                   Добавить
@@ -255,6 +257,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             </div>
           </main>
         </div>
+        <SaveNotice />
+        <Dialog open={adding} onOpenChange={setAdding} title="Добавить запись" description="Что хотите записать?">
+          <div className="grid gap-2 sm:grid-cols-2">{quickActions.filter((item) => !item.href.includes("imports")).map((item) => <Link key={item.href} href={item.href} onClick={() => setAdding(false)} className="flex min-h-14 items-center rounded-control border border-line px-4 py-3 text-sm hover:bg-elevated">{item.label}</Link>)}</div>
+          <Link href="/dashboard/imports?action=new" onClick={() => setAdding(false)} className="text-link mt-4">Импортировать из файла</Link>
+        </Dialog>
         <CommandPalette open={palette} onOpenChange={setPalette} />
       </div>
     </AuthBoundary>

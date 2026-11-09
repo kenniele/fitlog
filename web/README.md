@@ -70,3 +70,9 @@ The overview is a continuous sequence: today, yearly history, InBody, training, 
 - The InBody SVG is a fixed measurement-navigation diagram. It does not model the user's physique. The timeline and comparison selectors use actual stored measurements, including partial segment data.
 - Monthly totals cover recorded values; averages divide by recorded days, with coverage shown beside each metric. Average comparisons require at least seven observations and 70% coverage in both months. Workout totals compare only complete calendar months.
 - Domain requests render independently. Month-review queries start near the viewport. No production fixtures, new backend contracts, or visualization dependencies are introduced.
+
+## Everyday entry flows
+
+Training, recovery, nutrition and body pages open on the journal; the “Динамика” view keeps charts separate. Each section handles its own loading and errors. On phones, journal rows become readable records with actions beside the date. “Добавить” opens record types directly, including sleep.
+
+Editors confirm discarding unsaved changes, warn before unloading the page, and prevent dismissal or further edits during a save. This is dismissal protection, not persistent offline drafts. Sleep inputs display hours/minutes while preserving the API's seconds contract; recovery thresholds use numeric controls. Integration metadata and optional measurements retain their existing contracts.

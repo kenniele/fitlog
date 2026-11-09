@@ -6,10 +6,11 @@ import { Plus } from "lucide-react";
 import { apiFetch, type ListResponse } from "@/lib/api";
 import type { AnalyticsResponse, BodyMeasurement } from "@/lib/types";
 import { useQuickAction, useRangeSearch } from "@/lib/hooks";
+import { JournalSections, QuerySection } from "@/components/ui/journal-sections";
 import { PageHeader } from "@/components/ui/page";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ErrorState, InlineError, PageSkeleton } from "@/components/ui/states";
+import { InlineError, PageSkeleton } from "@/components/ui/states";
 import { MetricGrid } from "@/components/charts/metric-card";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { MetricSwitcherChart } from "@/components/charts/metric-switcher-chart";
@@ -37,10 +38,8 @@ function BodyContent() {
   const measurements = useQuery({ queryKey: ["body-history", historyScope, page], queryFn: () => apiFetch<ListResponse<BodyMeasurement>>(bodyHistoryPath(historyScope, page)), placeholderData: keepPreviousData });
   const remove = useMutation({ mutationFn: (id: string | number) => apiFetch(`/body-measurements/${id}`, { method: "DELETE" }), onSuccess: async () => { setDeleting(null); await client.invalidateQueries(); } });
 
-  if (analytics.isError || measurements.isError) return <ErrorState error={analytics.error ?? measurements.error} retry={() => { void Promise.all([analytics.refetch(), measurements.refetch()]); }} />;
-  if (analytics.isPending || measurements.isPending) return <PageSkeleton />;
 
-  const daily = analytics.data.daily ?? analytics.data.series ?? [];
+  const daily = analytics.data?.daily ?? analytics.data?.series ?? [];
   const averagedWeights = daily.filter((point) => typeof point.weight_7d_average === "number");
   const first = averagedWeights[0];
   const last = averagedWeights.at(-1);
@@ -50,13 +49,13 @@ function BodyContent() {
     : null;
 
   return <>
-    <PageHeader eyebrow="InBody" title="Состав тела и InBody" description="История измерений состава тела и ориентировочная оценка жира по питанию после последнего InBody." actions={<Button variant="primary" onClick={() => { setEditing(null); setForm(true); }}><Plus className="size-4" />Добавить InBody</Button>} />
-    <InBodyExplorer />
-    <MetricGrid metrics={analytics.data.comparison ? comparisonSummaryMetrics(analytics.data.summary, analytics.data.comparison) : summaryToMetrics(analytics.data.summary)} order={[{ key: "weight", label: "Вес" }, { key: "body_fat", label: "Жир" }, { key: "skeletal_muscle_mass", label: "Скелетные мышцы" }, { key: "inbody_score", label: "InBody Score" }]} />
+    <PageHeader eyebrow="InBody" title="Состав тела и InBody" description="История измерений состава тела и ориентировочная оценка жира по питанию после последнего InBody." actions={<Button variant="primary" onClick={() => { setEditing(null); setForm(true); }}><Plus className="size-4" />Добавить измерение</Button>} />
+    <JournalSections journal={<QuerySection query={measurements} title="Не удалось загрузить измерения">{measurements.data && <BodyHistory data={measurements.data} scope={historyScope} page={page} fetching={measurements.isFetching} onScopeChange={(scope) => { setHistoryScope(scope); setPage(1); }} onPageChange={setPage} onEdit={(entry) => { setEditing(entry); setForm(true); }} onDelete={setDeleting} />}</QuerySection>} analytics={<QuerySection query={analytics} title="Не удалось загрузить динамику измерений">    <InBodyExplorer />
+    <MetricGrid metrics={analytics.data?.comparison ? comparisonSummaryMetrics(analytics.data?.summary, analytics.data?.comparison) : summaryToMetrics(analytics.data?.summary)} order={[{ key: "weight", label: "Вес" }, { key: "body_fat", label: "Жир" }, { key: "skeletal_muscle_mass", label: "Скелетные мышцы" }, { key: "inbody_score", label: "InBody Score" }]} />
     <Card className="p-4"><p className="text-xs text-muted">Средняя скорость по 7-дневному весу</p><p className="mt-2 text-2xl font-semibold">{formatNumber(weeklyRate, { maximumFractionDigits: 2 }, " кг/нед")}</p><p className="mt-1 text-xs text-muted">{weeklyRate === null ? "Нужно минимум две полные 7-дневные точки." : `Расчёт по периоду ${formatDate(first?.date)} — ${formatDate(last?.date)}; это описание истории, не прогноз.`}</p></Card>
-    <BodyHistory data={measurements.data} scope={historyScope} page={page} fetching={measurements.isFetching} onScopeChange={(scope) => { setHistoryScope(scope); setPage(1); }} onPageChange={setPage} onEdit={(entry) => { setEditing(entry); setForm(true); }} onDelete={setDeleting} />
 
-    <BodyFatEstimateCard estimate={analytics.data.body_fat_estimate} />
+
+    <BodyFatEstimateCard estimate={analytics.data?.body_fat_estimate} />
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
       <TrendChart title="Вес и 7-дневное среднее" description="Среднее рассчитывается только по полному окну наблюдений." data={daily} series={[{ key: "weight_kg", label: "Вес" }, { key: "weight_7d_average", label: "Среднее 7д", color: "var(--accent-blue)" }]} />
       <TrendChart title="Жировая и безжировая масса" data={daily} series={[{ key: "fat_mass_kg", label: "Жировая масса", color: "var(--warning)" }, { key: "lean_mass_kg", label: "Безжировая", color: "var(--accent)" }, { key: "skeletal_muscle_mass_kg", label: "Скелетные мышцы", color: "var(--accent-blue)" }]} />
@@ -75,6 +74,7 @@ function BodyContent() {
       ]} />
       <CalendarHeatmap title="История измерений веса" description="Пустые дни не трактуются как нулевой вес." data={daily} dataKey="weight_kg" unit="кг" color="var(--accent-blue)" />
     </div>
+</QuerySection>} />
     <BodyForm open={form} onOpenChange={(value) => { setForm(value); if (!value) setEditing(null); }} entry={editing} />
     <InlineError error={remove.error} />
     <ConfirmDialog open={Boolean(deleting)} onOpenChange={(value) => { if (!value) setDeleting(null); }} title="Удалить измерение?" description="Эта точка исчезнет из истории состава тела." onConfirm={() => deleting && remove.mutate(deleting.id)} busy={remove.isPending} error={remove.error} />

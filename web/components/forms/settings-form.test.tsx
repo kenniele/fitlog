@@ -11,8 +11,8 @@ describe("SettingsForm", () => {
     const user = userEvent.setup();
     render(<QueryClientProvider client={client}><SettingsForm settings={{ timezone: "Europe/Moscow", first_day_of_week: 1 }} /></QueryClientProvider>);
 
-    await user.type(screen.getByLabelText("Минимум, секунд"), "36000");
-    await user.type(screen.getByLabelText("Максимум, секунд"), "28800");
+    await user.type(screen.getByLabelText("Минимум сна: часы"), "10");
+    await user.type(screen.getByLabelText("Максимум сна: часы"), "8");
     await user.click(screen.getByRole("button", { name: "Сохранить настройки" }));
 
     expect(await screen.findByText("Минимум не может превышать максимум")).toBeInTheDocument();

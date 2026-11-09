@@ -16,6 +16,7 @@ export const navigation = [
 export const quickActions = [
   { href: "/dashboard/training?action=new", label: "Добавить тренировку" },
   { href: "/dashboard/recovery?action=new", label: "Записать восстановление" },
+  { href: "/dashboard/recovery?action=sleep", label: "Записать сон" },
   { href: "/dashboard/nutrition?action=new", label: "Записать питание" },
   { href: "/dashboard/body?action=new", label: "Добавить измерение" },
   { href: "/dashboard/imports?action=new", label: "Импортировать файл" },
